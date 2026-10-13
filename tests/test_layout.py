@@ -3,7 +3,8 @@ import random
 
 import pytest
 
-from gridmosaic.layout import grid_layout, puzzle_layout
+from gridmosaic.layout import (fixed_grid, grid_layout, justified_columns, justified_rows,
+                               puzzle_layout)
 
 EPS = 1e-6
 PORTRAIT, LANDSCAPE, OLD_TV = 9 / 16, 16 / 9, 4 / 3
@@ -80,3 +81,29 @@ def test_same_seed_same_layout():
 def test_empty():
     assert puzzle_layout([], 100, 100).rects == []
     assert grid_layout([], 100, 100).rects == []
+
+
+@pytest.mark.parametrize("fn", [justified_rows, justified_columns])
+@pytest.mark.parametrize("n", [1, 5, 23, 32])
+def test_justified_layouts_valid_and_ordered(fn, n):
+    aspects = _mixed(n, seed=n + 7)
+    result = fn(aspects, 3840, 2160, gap=2, max_crop=0.12)
+    _assert_valid(result, n, 3840, 2160)
+    assert result.max_crop <= 0.12 + 1e-6
+    if fn is justified_rows and n > 1:
+        # playlist order reads left-to-right, top-to-bottom
+        keys = [(round(r.y), r.x) for r in result.rects]
+        assert keys == sorted(keys)
+
+
+def test_justified_rows_fill_well():
+    aspects = [LANDSCAPE] * 19 + [PORTRAIT] * 13
+    result = justified_rows(aspects, 3840, 2160)
+    assert result.coverage > 0.9
+
+
+def test_fixed_grid_respects_shape():
+    aspects = [LANDSCAPE] * 10
+    result = fixed_grid(aspects, 1920, 1080, cols=5, rows=2)
+    _assert_valid(result, 10, 1920, 1080)
+    assert len({round(r.y) for r in result.rects}) == 2

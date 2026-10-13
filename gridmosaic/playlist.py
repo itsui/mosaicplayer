@@ -36,12 +36,17 @@ class Entry:
     volume: float = 1.0
     rate: float = 1.0
     start_random: bool = False
+    position: float = 0.0  # seconds; GridPlayer stores milliseconds
     extra: dict = field(default_factory=dict)  # untouched GridPlayer fields
 
-    def to_gpls_params(self) -> dict:
+    def to_gpls_params(self, save_position=True, save_paused=True) -> dict:
         params = dict(self.extra)
-        params.update(is_muted=self.muted, is_paused=self.paused, volume=self.volume,
-                      rate=self.rate, is_start_random=self.start_random)
+        params.update(is_muted=self.muted, volume=self.volume, rate=self.rate,
+                      is_start_random=self.start_random)
+        if save_paused:
+            params["is_paused"] = self.paused
+        if save_position and self.position > 0:
+            params["current_position"] = int(self.position * 1000)
         return params
 
 
@@ -83,15 +88,18 @@ def read_gpls(path: str | os.PathLike) -> Playlist:
             volume=vp.pop("volume", 1.0),
             rate=vp.pop("rate", 1.0),
             start_random=vp.pop("is_start_random", False),
+            position=vp.pop("current_position", 0) / 1000,
             extra=vp,
         ))
     return Playlist(entries, params)
 
 
-def write_gpls(path: str | os.PathLike, playlist: Playlist) -> None:
+def write_gpls(path: str | os.PathLike, playlist: Playlist, save_positions=True,
+               save_paused=True) -> None:
     lines = [GPLS_HEADER, "#P:" + json.dumps(playlist.params, separators=(",", ":"))]
     for idx, entry in enumerate(playlist.entries):
-        lines.append(f"#V{idx}:" + json.dumps(entry.to_gpls_params(), separators=(",", ":")))
+        params = entry.to_gpls_params(save_positions, save_paused)
+        lines.append(f"#V{idx}:" + json.dumps(params, separators=(",", ":")))
     lines += [e.path for e in playlist.entries]
     Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
 

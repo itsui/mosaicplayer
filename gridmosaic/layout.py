@@ -319,3 +319,139 @@ def _finish(rects, aspects, width, height) -> LayoutResult:
         size_spread=max(areas) / min(areas),
         max_crop=max(_crop(r, a) for r, a in zip(rects, aspects)),
     )
+
+
+def justified_rows(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
+                   crop_cost=0.5) -> LayoutResult:
+    """Rows that each span the full width, in playlist order (Google Photos style).
+
+    Row breaks are chosen by dynamic programming so every row's natural height
+    is close to the target; the remaining mismatch is absorbed by cropping
+    within ``max_crop``, or by centring the rows if that isn't enough.
+    """
+    n = len(aspects)
+    if n == 0:
+        return LayoutResult([], 0.0, 1.0, 0.0)
+    ev = _Evaluator(aspects, width, height, gap, max_crop, evenness, crop_cost)
+    best = None
+    for k in range(1, n + 1):
+        target = (height - gap * (k - 1)) / k
+        if target <= 1:
+            break
+        rows = _partition_rows(aspects, width, gap, target, k)
+        rects = _place_rows(rows, aspects, width, height, gap, max_crop)
+        score = ev.score_rects(rects)
+        if best is None or score > best[0]:
+            best = (score, rects)
+    return _finish(best[1], aspects, width, height)
+
+
+def justified_columns(aspects, width, height, **kwargs) -> LayoutResult:
+    """Columns that each span the full height, in playlist order."""
+    flipped = justified_rows([1 / a for a in aspects], height, width, **kwargs)
+    rects = [Rect(r.y, r.x, r.h, r.w) for r in flipped.rects]
+    return _finish(rects, aspects, width, height)
+
+
+def _natural_height(aspects, width, gap, i, j):
+    return (width - gap * (j - i - 1)) / sum(aspects[i:j])
+
+
+def _partition_rows(aspects, width, gap, target, k):
+    """Split aspects[0:n] into k consecutive rows with heights close to target."""
+    n = len(aspects)
+    inf = float("inf")
+    cost = [[inf] * (n + 1) for _ in range(k + 1)]
+    back = [[0] * (n + 1) for _ in range(k + 1)]
+    cost[0][0] = 0.0
+    for rows in range(1, k + 1):
+        for j in range(rows, n + 1):
+            for i in range(rows - 1, j):
+                if cost[rows - 1][i] == inf:
+                    continue
+                h = _natural_height(aspects, width, gap, i, j)
+                c = cost[rows - 1][i] + math.log(h / target) ** 2
+                if c < cost[rows][j]:
+                    cost[rows][j], back[rows][j] = c, i
+    bounds, j = [], n
+    for rows in range(k, 0, -1):
+        i = back[rows][j]
+        bounds.append((i, j))
+        j = i
+    return bounds[::-1]
+
+
+def _place_rows(rows, aspects, width, height, gap, max_crop):
+    keep = 1.0 - max_crop
+    natural, lo, hi = [], [], []
+    for i, j in rows:
+        inner = width - gap * (j - i - 1)
+        s = sum(aspects[i:j])
+        natural.append(inner / s)
+        hi.append(inner / (s * keep))  # taller: crop the sides
+        lo.append(inner * keep / s)  # shorter: crop top and bottom
+    avail = height - gap * (len(rows) - 1)
+    heights = _fit_heights(natural, lo, hi, avail)
+    scale = min(1.0, avail / sum(heights))
+    heights = [h * scale for h in heights]
+    used_h = sum(heights) + gap * (len(rows) - 1)
+    y = (height - used_h) / 2
+    rects: list[Rect | None] = [None] * len(aspects)
+    for (i, j), h in zip(rows, heights):
+        # Shrinking rows (scale < 1) shrinks widths too, so centre each row.
+        widths = [aspects[t] * h for t in range(i, j)]
+        inner = (width - gap * (j - i - 1)) * scale
+        widths = [w * inner / sum(widths) for w in widths]
+        x = (width - (inner + gap * (j - i - 1))) / 2
+        for t, w in zip(range(i, j), widths):
+            rects[t] = Rect(x, y, w, h)
+            x += w + gap
+        y += h + gap
+    return rects
+
+
+def _fit_heights(natural, lo, hi, total):
+    """Adjust row heights within [lo, hi] so they sum to ``total`` if possible."""
+    heights = list(natural)
+    for _ in range(50):
+        diff = total - sum(heights)
+        if abs(diff) < 1e-6:
+            break
+        free = [i for i, h in enumerate(heights)
+                if (diff > 0 and h < hi[i] - 1e-9) or (diff < 0 and h > lo[i] + 1e-9)]
+        if not free:
+            break
+        weight = sum(natural[i] for i in free)
+        for i in free:
+            heights[i] = min(max(heights[i] + diff * natural[i] / weight, lo[i]), hi[i])
+    return heights
+
+
+def fixed_grid(aspects, width, height, cols, rows, gap=0.0) -> LayoutResult:
+    """GridPlayer-style grid with a chosen number of columns and rows."""
+    n = len(aspects)
+    if n == 0:
+        return LayoutResult([], 0.0, 1.0, 0.0)
+    cols = max(1, cols or math.ceil(math.sqrt(n)))
+    rows = max(1, rows or math.ceil(n / cols))
+    if cols * rows < n:
+        rows = math.ceil(n / cols)
+    cw = (width - gap * (cols - 1)) / cols
+    ch = (height - gap * (rows - 1)) / rows
+    rects = []
+    for i, a in enumerate(aspects):
+        r, c = divmod(i, cols)
+        w = min(cw, ch * a)
+        h = w / a
+        cx, cy = c * (cw + gap), r * (ch + gap)
+        rects.append(Rect(cx + (cw - w) / 2, cy + (ch - h) / 2, w, h))
+    return _finish(rects, aspects, width, height)
+
+
+LAYOUT_MODES = {
+    "puzzle": "Puzzle — fill the screen, similar sizes (reorders videos)",
+    "rows": "Justified rows — keeps playlist order",
+    "columns": "Justified columns — keeps playlist order",
+    "grid": "Auto grid — equal cells, best column count",
+    "fixed-grid": "Fixed grid — your rows × columns",
+}

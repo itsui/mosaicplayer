@@ -48,3 +48,12 @@ def test_write_minimal(tmp_path):
     write_gpls(out, Playlist([Entry("/v/1.mp4")]))
     pl = read_gpls(out)
     assert pl.entries[0].path == "/v/1.mp4"
+
+
+def test_positions_round_trip(tmp_path):
+    out = tmp_path / "p.gpls"
+    write_gpls(out, Playlist([Entry("/v/1.mp4", position=12.5)]))
+    assert '"current_position":12500' in out.read_text()
+    assert read_gpls(out).entries[0].position == 12.5
+    write_gpls(out, Playlist([Entry("/v/1.mp4", position=12.5)]), save_positions=False)
+    assert "current_position" not in out.read_text()
