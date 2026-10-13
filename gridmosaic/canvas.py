@@ -201,7 +201,10 @@ class Canvas(QOpenGLWidget):
 
             def refine():
                 refined = puzzle_layout(aspects, w, h, time_budget=c.layout_effort, **args)
-                self._layout_done.emit(generation, (tiles, refined))
+                try:
+                    self._layout_done.emit(generation, (tiles, refined))
+                except RuntimeError:
+                    pass  # window closed while the layout was being refined
 
             threading.Thread(target=refine, daemon=True).start()
             return
@@ -233,12 +236,17 @@ class Canvas(QOpenGLWidget):
         self._gl_ready = True
 
     def paintGL(self):
+        p = QPainter(self)
+        # Raw GL (clear + texture blits) must be bracketed so QPainter's own
+        # GL state is saved and restored around it.
+        p.beginNativePainting()
         f = QOpenGLContext.currentContext().functions()
         bg = QColor(self.cfg.background)
         f.glClearColor(bg.redF(), bg.greenF(), bg.blueF(), 1.0)
         f.glClear(GL_COLOR_BUFFER_BIT)
         dpr = self.devicePixelRatioF()
         viewport = QRect(0, 0, int(self.width() * dpr), int(self.height() * dpr))
+        f.glViewport(0, 0, viewport.width(), viewport.height())
         blitter = self._blitter
         blitter.bind()
         for tile, rect in zip(self._layout_tiles, self.rects):
@@ -254,27 +262,30 @@ class Canvas(QOpenGLWidget):
                 transform = QOpenGLTextureBlitter.targetTransform(target, viewport)
                 blitter.blit(fbo.texture(), transform, QOpenGLTextureBlitter.OriginTopLeft)
         blitter.release()
-        self._paint_overlays()
+        p.endNativePainting()
+        self._paint_overlays(p)
+        p.end()
         now = time.perf_counter()
         self._frame_times = [t for t in self._frame_times if now - t < 1.0] + [now]
 
     def tile_fps(self) -> float:
-        """Average frames each tile actually showed per second, since last asked."""
+        """Average frames each tile actually showed per second (1 s window)."""
         now = time.perf_counter()
         total = sum(t.frames_drawn for t in self.tiles)
         last_t, last_total = getattr(self, "_fps_mark", (now, total))
-        self._fps_mark = (now, total)
-        if now - last_t < 0.2 or not self.tiles:
+        if not hasattr(self, "_fps_mark"):
+            self._fps_mark = (now, total)
+        if now - last_t < 1.0 or not self.tiles:
             return getattr(self, "_last_fps", 0.0)
-        self._last_fps = (total - last_total) / (now - last_t) / len(self.tiles)
+        self._fps_mark = (now, total)
+        self._last_fps = max(0.0, (total - last_total) / (now - last_t) / len(self.tiles))
         return self._last_fps
 
     def _logical(self, rect: Rect) -> QRectF:
         dpr = self.devicePixelRatioF()
         return QRectF(rect.x / dpr, rect.y / dpr, rect.w / dpr, rect.h / dpr)
 
-    def _paint_overlays(self):
-        p = QPainter(self)
+    def _paint_overlays(self, p: QPainter):
         p.setRenderHint(QPainter.Antialiasing)
         small = QFont(self.font())
         small.setPointSizeF(9.5)
@@ -312,7 +323,6 @@ class Canvas(QOpenGLWidget):
                 p.drawRect(target)
         if self.show_hud:
             self._paint_hud(p)
-        p.end()
 
     def _paint_info_bar(self, p: QPainter, tile: Tile, r: QRectF, full: bool):
         if self.cfg.titles == "never" and not full:
