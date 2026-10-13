@@ -267,10 +267,10 @@ def _anneal(tree, ev, aspects, rng, budget, max_iters, t_start=0.2, t_end=0.002)
     temperature = t_start
     for i in range(max_iters):
         if i % 32 == 0:
-            progress = (time.perf_counter() - start) / budget
+            # Cool from hot to cold over whichever budget runs out first.
+            progress = max((time.perf_counter() - start) / budget, i / max_iters)
             if progress >= 1.0:
                 break
-            # Cool from hot to cold over the time budget.
             temperature = t_start * (t_end / t_start) ** progress
         cand = _mutate(current, aspects, rng)
         s = ev.score(cand)[0]

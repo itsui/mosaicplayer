@@ -57,3 +57,10 @@ def test_positions_round_trip(tmp_path):
     assert read_gpls(out).entries[0].position == 12.5
     write_gpls(out, Playlist([Entry("/v/1.mp4", position=12.5)]), save_positions=False)
     assert "current_position" not in out.read_text()
+
+
+def test_relative_paths_resolve_against_playlist(tmp_path):
+    (tmp_path / "videos").mkdir()
+    p = tmp_path / "list.gpls"
+    p.write_text("#GRIDPLAYER\n#P:{}\nvideos/a.mp4\n")
+    assert read_gpls(p).entries[0].path == str(tmp_path / "videos" / "a.mp4")

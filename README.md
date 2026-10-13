@@ -74,6 +74,7 @@ not fixed-size boxes.
 | Click / double-click / Enter | pause one / focus one |
 | Middle-click | mute or unmute one |
 | Wheel, ← → | seek ±5 s (Shift+wheel ±30 s) |
+| Ctrl+wheel, Z | zoom into the hovered video towards the cursor, reset zoom |
 | Drag a tile onto another | swap them |
 | Space, M | pause all, mute all |
 | S, Y, Home | random positions, sync all to hovered, restart all |

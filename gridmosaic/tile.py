@@ -354,6 +354,31 @@ class Tile(QObject):
         if duration:
             self.seek_to(random.uniform(0, duration * 0.9))
 
+    def zoom_at(self, steps: float, fx: float, fy: float):
+        """Zoom by ``steps`` (log2 units) keeping the point (fx, fy) of the tile still.
+
+        fx, fy are the cursor's position inside the tile, 0..1.
+        """
+        z = self.player.video_zoom or 0.0
+        s = 2.0 ** z
+        new_z = max(0.0, min(z + steps, 4.0))
+        s2 = 2.0 ** new_z
+        if new_z == 0.0:
+            self.reset_zoom()
+            return
+        # mpv maps video point u to screen x = 0.5 + (u - 0.5) * s + pan * s
+        for axis, f in (("x", fx), ("y", fy)):
+            pan = getattr(self.player, f"video_pan_{axis}") or 0.0
+            u = (f - 0.5 - pan * s) / s + 0.5
+            new_pan = (f - 0.5 - (u - 0.5) * s2) / s2
+            setattr(self.player, f"video_pan_{axis}", new_pan)
+        self.player.video_zoom = new_z
+
+    def reset_zoom(self):
+        self.player.video_zoom = 0.0
+        self.player.video_pan_x = 0.0
+        self.player.video_pan_y = 0.0
+
     def progress(self) -> tuple[float, float]:
         return (self.player.time_pos or 0.0, self.player.duration or 0.0)
 

@@ -46,7 +46,8 @@ def test_puzzle_respects_no_crop():
 def test_puzzle_beats_grid_on_mixed_orientations():
     aspects = [LANDSCAPE] * 19 + [PORTRAIT] * 13  # same mix as a real test playlist
     grid = grid_layout(aspects, 3840, 2160)
-    puzzle = puzzle_layout(aspects, 3840, 2160, time_budget=0.6)
+    # Bounded by iterations, not time, so a busy machine gives the same result.
+    puzzle = puzzle_layout(aspects, 3840, 2160, time_budget=60, max_iters=24000)
     assert puzzle.coverage > 0.95
     assert puzzle.coverage > grid.coverage + 0.2
     assert puzzle.size_spread < 3.5

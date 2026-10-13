@@ -21,6 +21,7 @@ HELP = """<h3>GridMosaic keys</h3><table cellspacing=4>
 <tr><td><b>Space</b></td><td>pause / play all</td><td><b>Click</b></td><td>pause one</td></tr>
 <tr><td><b>M</b></td><td>mute / unmute all</td><td><b>Middle-click</b></td><td>mute / unmute one</td></tr>
 <tr><td><b>Wheel</b></td><td>seek ±5 s (Shift ±30 s)</td><td><b>← →</b></td><td>seek hovered video</td></tr>
+<tr><td><b>Ctrl+wheel</b></td><td>zoom into the hovered video</td><td><b>Z</b></td><td>reset zoom</td></tr>
 <tr><td><b>Double-click</b>, <b>Enter</b></td><td>focus one video</td><td><b>Esc</b></td><td>show all / leave fullscreen</td></tr>
 <tr><td><b>Drag</b> a video</td><td>swap it with another</td><td><b>Del</b></td><td>remove hovered video</td></tr>
 <tr><td><b>1</b>–<b>5</b></td><td>puzzle, rows, columns, grid, fixed grid</td><td><b>R</b></td><td>reshuffle puzzle</td></tr>
@@ -140,6 +141,7 @@ class MainWindow(QMainWindow):
         self._act(m, "Seek hovered forward 5 s", self._hovered(lambda t: t.seek(5)), ["Right"])
         self._act(m, "Replace hovered with random from its folder",
                   self._hovered(c.replace_with_random), ["N"])
+        self._act(m, "Reset zoom of hovered video", self._hovered(lambda t: t.reset_zoom()), ["Z"])
         self._act(m, "Remove hovered video", self._hovered(c.remove_tile), ["Del"])
 
         m = self.layout_menu = bar.addMenu("&Layout")
@@ -211,6 +213,7 @@ class MainWindow(QMainWindow):
             menu.addAction("Play" if tile.paused else "Pause", tile.toggle_pause)
             menu.addAction("Restart", lambda: tile.seek_to(0))
             menu.addAction("Jump to random position", tile.seek_random)
+            menu.addAction("Reset zoom", tile.reset_zoom)
             menu.addAction("Sync all to this video", lambda: c.sync_to(tile))
             menu.addAction("Replace with random from folder", lambda: c.replace_with_random(tile))
             speed = menu.addMenu("Speed")

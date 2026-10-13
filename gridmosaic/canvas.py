@@ -430,8 +430,15 @@ class Canvas(QOpenGLWidget):
         tile = self.tile_at(event.position())
         if tile is None:
             return
+        up = event.angleDelta().y() > 0
+        if event.modifiers() & Qt.ControlModifier:
+            r = self._rect_of(tile)
+            pos = event.position()
+            tile.zoom_at(0.25 if up else -0.25,
+                         (pos.x() - r.left()) / r.width(), (pos.y() - r.top()) / r.height())
+            return
         step = 30 if event.modifiers() & Qt.ShiftModifier else 5
-        tile.seek(step if event.angleDelta().y() > 0 else -step)
+        tile.seek(step if up else -step)
 
     # --- commands -----------------------------------------------------------
 

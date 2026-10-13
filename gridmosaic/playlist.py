@@ -78,9 +78,12 @@ def read_gpls(path: str | os.PathLike) -> Playlist:
         elif not ln.startswith("#"):
             uris.append(ln)
 
+    base = Path(path).resolve().parent
     entries = []
     for idx, uri in enumerate(uris):
         vp = dict(video_params.get(idx, {}))
+        if "://" not in uri and not Path(uri).is_absolute():
+            uri = str((base / uri).resolve())  # relative to the playlist (GridPlayer #109)
         entries.append(Entry(
             path=uri,
             muted=vp.pop("is_muted", True),
