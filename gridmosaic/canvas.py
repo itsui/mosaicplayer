@@ -50,7 +50,6 @@ class Canvas(QOpenGLWidget):
         self.show_hud = False
         self._seed = 0
         self._layout_generation = 0
-        self._gl_ready = False
         self._frame_times: list[float] = []
         self._press: tuple[QPointF, Tile] | None = None
         self._dragging = False
@@ -257,7 +256,6 @@ class Canvas(QOpenGLWidget):
         for tile in self._unassigned:
             self.pool.add(tile)
         self._unassigned.clear()
-        self._gl_ready = True
 
     def paintGL(self):
         p = QPainter(self)
