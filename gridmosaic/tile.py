@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from pathlib import Path
 
 import mpv
@@ -128,6 +129,7 @@ class Tile(QObject):
         self.end_action = end_action
         self.aspect = DEFAULT_ASPECT
         self.aspect_known = False
+        self.created = time.monotonic()
         self.error: str | None = None
         self.uses_gpu = False
         self.load_mpx = 0.0
@@ -391,6 +393,7 @@ class Tile(QObject):
         self.entry.path = path
         self.error = None
         self.aspect_known = False
+        self.created = time.monotonic()
         self.player.play(path)
         if not self.paused:
             self.player.pause = False

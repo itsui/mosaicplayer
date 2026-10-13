@@ -109,7 +109,7 @@ class SettingsDialog(QDialog):
         self.hide_cursor = QSpinBox(minimum=0, maximum=60000, singleStep=500,
                                     value=c.hide_cursor_ms, suffix=" ms", specialValueText="never")
         self.on_top = QCheckBox("Keep window on top", checked=c.stay_on_top)
-        self.menubar = QCheckBox("Show menu bar (Alt shows it when hidden)", checked=c.show_menubar)
+        self.menubar = QCheckBox("Show menu bar (right-click or Ctrl+M when hidden)", checked=c.show_menubar)
         self.start_fs = QCheckBox("Start in fullscreen", checked=c.start_fullscreen)
         self._background = QColor(c.background)
         self.bg_button = QPushButton()

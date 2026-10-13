@@ -27,6 +27,8 @@ from .tile import NEXT, RANDOM, DecoderPolicy, Tile
 GL_COLOR_BUFFER_BIT = 0x4000
 
 QUICK_BUDGET_S = 0.08  # first puzzle layout, computed on the UI thread
+ANIMATION_S = 0.28  # tiles glide to new places when the layout changes
+SIZE_WAIT_S = 2.0  # how long new videos may hold the layout while reporting their size
 DRAG_THRESHOLD_PX = 12
 
 
@@ -55,6 +57,8 @@ class Canvas(QOpenGLWidget):
         self.pool: RenderPool | None = None  # created once the GL context exists
         self._blitter: QOpenGLTextureBlitter | None = None
         self._unassigned: list[Tile] = []
+        self._previous_rects: dict[int, Rect] = {}  # tile id -> rect before the change
+        self._animation_start = 0.0
 
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -175,6 +179,13 @@ class Canvas(QOpenGLWidget):
 
     def _relayout_now(self):
         tiles = self._visible_tiles()
+        # Videos report their size a moment after opening. Wait for them (up to
+        # SIZE_WAIT_S) instead of reshuffling once per video while they load.
+        now = time.monotonic()
+        if any(not t.aspect_known and not t.error and now - t.created < SIZE_WAIT_S
+               for t in tiles):
+            self._relayout_timer.start(150)
+            return
         self._layout_generation += 1
         generation = self._layout_generation
         if not tiles:
@@ -214,10 +225,23 @@ class Canvas(QOpenGLWidget):
         tiles, result = payload
         if generation != self._layout_generation:
             return  # a newer layout is on its way
+        old = {id(t): self._shown_rect(t, r) for t, r in zip(self._layout_tiles, self.rects)}
+        self._previous_rects = old
+        self._animation_start = time.perf_counter()
         self._layout_tiles = tiles
         self.rects = result.rects
         self.layout_info = result
         self.update()
+
+    def _shown_rect(self, tile: Tile, final: Rect) -> Rect:
+        """Where the tile is drawn right now (mid-animation if one is running)."""
+        start = self._previous_rects.get(id(tile))
+        t = (time.perf_counter() - self._animation_start) / ANIMATION_S
+        if start is None or t >= 1.0:
+            return final
+        e = 1 - (1 - t) ** 3  # ease out
+        return Rect(start.x + (final.x - start.x) * e, start.y + (final.y - start.y) * e,
+                    start.w + (final.w - start.w) * e, start.h + (final.h - start.h) * e)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -252,17 +276,20 @@ class Canvas(QOpenGLWidget):
         for tile, rect in zip(self._layout_tiles, self.rects):
             if tile not in self.tiles:
                 continue
-            w, h = int(round(rect.w)), int(round(rect.h))
-            tile.request_size(w, h)
+            # Render at the final size; mid-animation the texture is just scaled.
+            tile.request_size(int(round(rect.w)), int(round(rect.h)))
+            shown = self._shown_rect(tile, rect)
             with tile.target.lock:
                 fbo = tile.target.front
                 if fbo is None:
                     continue
-                target = QRectF(round(rect.x), round(rect.y), w, h)
+                target = QRectF(round(shown.x), round(shown.y), round(shown.w), round(shown.h))
                 transform = QOpenGLTextureBlitter.targetTransform(target, viewport)
                 blitter.blit(fbo.texture(), transform, QOpenGLTextureBlitter.OriginTopLeft)
         blitter.release()
         p.endNativePainting()
+        if time.perf_counter() - self._animation_start < ANIMATION_S:
+            self.update()  # keep animating even if no video has a new frame
         self._paint_overlays(p)
         p.end()
         now = time.perf_counter()

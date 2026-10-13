@@ -68,8 +68,9 @@ none.
 4. **Auto grid** — equal cells; picks the column count that shows the most video.
 5. **Fixed grid** — your rows × columns, like GridPlayer.
 
-The puzzle shows a quick layout at once and a refined one ~1 s later
-(Settings → Layout → search time). `R` reshuffles it, `C` toggles cropping.
+The layout waits (up to 2 s) until newly added videos report their size, shows
+a quick puzzle, then glides to a refined one ~1 s later (Settings → Layout →
+search time). `R` reshuffles it, `C` toggles cropping.
 MaxRects-style bin packing doesn't fit this problem: tiles here are scalable,
 not fixed-size boxes.
 
