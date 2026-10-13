@@ -168,7 +168,7 @@ class Tile(QObject):
             input_default_bindings=False,
             input_vo_keyboard=False,
             terminal=False,
-            ytdl=False,
+            ytdl="://" in entry.path,  # resolve web pages via yt-dlp if installed
             sub_auto="no",
             log_handler=_mpv_log if log.isEnabledFor(logging.DEBUG) else None,
             loglevel="v" if log.isEnabledFor(logging.DEBUG) else "warn",
