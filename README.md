@@ -44,12 +44,18 @@ same 32 clips looping in mpv, VDPAU kept NVDEC 97% busy against 46% for
 native NVDEC. Many of the clips are 5 s long, so GridPlayer's seek-to-loop
 also restarts ~5 decoders a second.
 
-**Why not GPU zero-copy by default:** NVDEC zero-copy (CUDA→OpenGL interop) is
-fastest but showed intermittent green line artifacts with many players
-sharing one GL context. Copy mode is clean, but every GPU-decoded video costs
-a CUDA context (a few hundred MB of VRAM). For small clips the CPU is clean,
-cheap and uses no VRAM, so **auto** mode decodes small videos on the CPU and
-only sends large ones (above ~1080p30, configurable) to NVDEC.
+**Why not GPU decoding for everything:** every GPU-decoded video costs a CUDA
+context (a few hundred MB of VRAM); in zero-copy mode every tile does, because
+mpv sets up the CUDA→OpenGL interop per player. On the 32-video playlist,
+zero-copy used 9.6 GB of VRAM and 3.9 GB of RAM against 0 GB and 1.2 GB for
+auto. For small clips the CPU is cheap and uses no VRAM, so **auto** decodes
+small videos on the CPU and sends only large ones (above ~1080p30,
+configurable) to NVDEC in copy mode.
+
+Zero-copy showed intermittent green line artifacts in early builds, where many
+players rendered on one thread. Since the render workers synchronise
+(`glFinish`) before handing textures to the window, 168 test frames showed
+none.
 
 ## Packing modes (keys 1–5)
 

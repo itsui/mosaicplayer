@@ -23,7 +23,7 @@ AUTO, GPU_COPY, GPU_ZERO_COPY, CPU = "auto", "gpu-copy", "gpu-zero-copy", "cpu"
 DECODER_MODES = {
     AUTO: "Auto — CPU for small videos, GPU for large ones",
     GPU_COPY: "GPU (NVDEC, copy) — every video on the GPU while the budget lasts",
-    GPU_ZERO_COPY: "GPU zero-copy — fastest, but can show green artifacts",
+    GPU_ZERO_COPY: "GPU zero-copy — least CPU, most video memory",
     CPU: "CPU only",
 }
 
@@ -65,10 +65,11 @@ class DecoderPolicy:
 
     Measured on an RTX 3090 with 32 clips of 480p-1080p h264:
       * GridPlayer's VLC/VDPAU path pinned NVDEC at 100% and stuttered;
-      * NVDEC zero-copy ran at ~45% but showed intermittent green line artifacts;
-      * NVDEC copy was clean, ~47%, but each GPU tile costs a CUDA context
-        (a few hundred MB of VRAM);
-      * CPU decoding was clean and cost ~3 of 24 cores.
+      * NVDEC zero-copy ran at ~45% (it showed green line artifacts until the
+        render workers synchronised with glFinish before handing textures over);
+      * every GPU tile costs a CUDA context (a few hundred MB of VRAM), and with
+        zero-copy so does every tile, because the interop is set up per player;
+      * CPU decoding cost ~3 of 24 cores and no VRAM.
     So by default small videos use the CPU and only large ones use the GPU.
     """
 
