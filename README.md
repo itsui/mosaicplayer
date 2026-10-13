@@ -14,6 +14,8 @@ playlists.
 
 Needs libmpv (`libmpv2` on Debian/Ubuntu/Mint) and Python 3.11+.
 
+![24 test clips, portrait and landscape, puzzle layout with the stats overlay](docs/screenshot.png)
+
 ## What's different from GridPlayer
 
 | | GridPlayer 0.5.5 | GridMosaic |
