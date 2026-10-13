@@ -12,20 +12,19 @@ import random
 import threading
 import time
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QOpenGLContext, QPainter, QPen
+from PySide6.QtOpenGL import QOpenGLTextureBlitter
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from .config import Config
 from .layout import (LayoutResult, Rect, fixed_grid, grid_layout, justified_columns,
                      justified_rows, puzzle_layout)
 from .playlist import Entry, siblings
+from .render import RenderPool
 from .tile import NEXT, RANDOM, DecoderPolicy, Tile
 
-GL_READ_FRAMEBUFFER = 0x8CA8
-GL_DRAW_FRAMEBUFFER = 0x8CA9
 GL_COLOR_BUFFER_BIT = 0x4000
-GL_NEAREST = 0x2600
 
 QUICK_BUDGET_S = 0.08  # first puzzle layout, computed on the UI thread
 DRAG_THRESHOLD_PX = 12
@@ -53,6 +52,9 @@ class Canvas(QOpenGLWidget):
         self._frame_times: list[float] = []
         self._press: tuple[QPointF, Tile] | None = None
         self._dragging = False
+        self.pool: RenderPool | None = None  # created once the GL context exists
+        self._blitter: QOpenGLTextureBlitter | None = None
+        self._unassigned: list[Tile] = []
 
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -60,7 +62,6 @@ class Canvas(QOpenGLWidget):
         self._relayout_timer = QTimer(self, singleShot=True, interval=120)
         self._relayout_timer.timeout.connect(self._relayout_now)
         self._layout_done.connect(self._apply_layout)
-        self.frameSwapped.connect(self._on_frame_swapped)
 
         # Overlays (progress bars, HUD) need periodic repaint even when paused.
         self._overlay_timer = QTimer(self, interval=250)
@@ -92,25 +93,29 @@ class Canvas(QOpenGLWidget):
 
     def _add_tile(self, entry: Entry) -> Tile:
         tile = Tile(entry, self.policy, self.cfg.end_action, self.cfg.scaling, self)
-        tile.frame_ready.connect(self.update)
         tile.aspect_changed.connect(lambda t=tile: self._on_aspect(t))
         tile.failed.connect(self.update)
         tile.reached_end.connect(lambda t=tile: self._on_reached_end(t))
-        if self._gl_ready:
-            self.makeCurrent()
-            tile.init_gl()
-            self.doneCurrent()
+        if self.pool is not None:
+            self.pool.add(tile)
+        else:
+            self._unassigned.append(tile)
         self.tiles.append(tile)
         return tile
+
+    def _destroy_tile(self, tile: Tile):
+        if self.pool is not None:
+            self.pool.remove(tile)  # waits until its GL objects are freed
+        if tile in self._unassigned:
+            self._unassigned.remove(tile)
+        tile.close()
 
     def remove_tile(self, tile: Tile):
         if tile not in self.tiles:
             return
         if self.solo is tile:
             self.set_solo(None)
-        self.makeCurrent()
-        tile.close()
-        self.doneCurrent()
+        self._destroy_tile(tile)
         self.tiles.remove(tile)
         self.hovered = None
         self.schedule_relayout()
@@ -118,10 +123,8 @@ class Canvas(QOpenGLWidget):
 
     def clear(self):
         self.set_solo(None)
-        self.makeCurrent()
         for tile in self.tiles:
-            tile.close()
-        self.doneCurrent()
+            self._destroy_tile(tile)
         self.tiles.clear()
         self.hovered = None
         self.schedule_relayout()
@@ -133,6 +136,10 @@ class Canvas(QOpenGLWidget):
         entries = [t.entry for t in self.tiles]
         self.clear()
         self.policy = self._make_policy()
+        if self.pool is not None and len(self.pool.workers) != self.cfg.render_threads:
+            self.pool.stop()
+            self.pool = RenderPool(self.context(), self.cfg.render_threads)
+            self.pool.frames_ready.connect(self.update)
         self.add_entries(entries)
 
     def entries(self) -> list[Entry]:
@@ -207,8 +214,6 @@ class Canvas(QOpenGLWidget):
         self._layout_tiles = tiles
         self.rects = result.rects
         self.layout_info = result
-        for t in tiles:
-            t.needs_render = True
         self.update()
 
     def resizeEvent(self, event):
@@ -218,39 +223,51 @@ class Canvas(QOpenGLWidget):
     # --- painting -----------------------------------------------------------
 
     def initializeGL(self):
-        for tile in self.tiles:
-            tile.init_gl()
+        self._blitter = QOpenGLTextureBlitter()
+        self._blitter.create()
+        self.pool = RenderPool(self.context(), self.cfg.render_threads)
+        self.pool.frames_ready.connect(self.update)
+        for tile in self._unassigned:
+            self.pool.add(tile)
+        self._unassigned.clear()
         self._gl_ready = True
 
     def paintGL(self):
-        f = QOpenGLContext.currentContext().extraFunctions()
+        f = QOpenGLContext.currentContext().functions()
         bg = QColor(self.cfg.background)
         f.glClearColor(bg.redF(), bg.greenF(), bg.blueF(), 1.0)
         f.glClear(GL_COLOR_BUFFER_BIT)
         dpr = self.devicePixelRatioF()
-        full_h = int(self.height() * dpr)
+        viewport = QRect(0, 0, int(self.width() * dpr), int(self.height() * dpr))
+        blitter = self._blitter
+        blitter.bind()
         for tile, rect in zip(self._layout_tiles, self.rects):
             if tile not in self.tiles:
                 continue
             w, h = int(round(rect.w)), int(round(rect.h))
-            fbo = tile.render(w, h)
-            if fbo is None:
-                continue
-            x0 = int(round(rect.x))
-            y0 = full_h - int(round(rect.y)) - h  # GL's origin is bottom-left
-            f.glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo)
-            f.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, self.defaultFramebufferObject())
-            f.glBlitFramebuffer(0, 0, w, h, x0, y0, x0 + w, y0 + h,
-                                GL_COLOR_BUFFER_BIT, GL_NEAREST)
-        f.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, self.defaultFramebufferObject())
-        f.glViewport(0, 0, int(self.width() * dpr), full_h)  # mpv leaves its own viewport
+            tile.request_size(w, h)
+            with tile.target.lock:
+                fbo = tile.target.front
+                if fbo is None:
+                    continue
+                target = QRectF(round(rect.x), round(rect.y), w, h)
+                transform = QOpenGLTextureBlitter.targetTransform(target, viewport)
+                blitter.blit(fbo.texture(), transform, QOpenGLTextureBlitter.OriginTopLeft)
+        blitter.release()
         self._paint_overlays()
         now = time.perf_counter()
         self._frame_times = [t for t in self._frame_times if now - t < 1.0] + [now]
 
-    def _on_frame_swapped(self):
-        for tile in self.tiles:
-            tile.report_swap()
+    def tile_fps(self) -> float:
+        """Average frames each tile actually showed per second, since last asked."""
+        now = time.perf_counter()
+        total = sum(t.frames_drawn for t in self.tiles)
+        last_t, last_total = getattr(self, "_fps_mark", (now, total))
+        self._fps_mark = (now, total)
+        if now - last_t < 0.2 or not self.tiles:
+            return getattr(self, "_last_fps", 0.0)
+        self._last_fps = (total - last_total) / (now - last_t) / len(self.tiles)
+        return self._last_fps
 
     def _logical(self, rect: Rect) -> QRectF:
         dpr = self.devicePixelRatioF()
@@ -325,7 +342,7 @@ class Canvas(QOpenGLWidget):
             f"layout: {self.cfg.layout_mode}"
             + (f"   covered {info.coverage * 100:.1f}%   size spread {info.size_spread:.1f}x"
                f"   max crop {info.max_crop * 100:.0f}%" if info and info.rects else ""),
-            f"redraws/s: {len(self._frame_times)}",
+            f"redraws/s: {len(self._frame_times)}   video frames/s per tile: {self.tile_fps():.1f}",
         ]
         box = QRectF(10, 10, 620, 18 * len(lines) + 12)
         p.fillRect(box, QColor(0, 0, 0, 170))
@@ -421,7 +438,6 @@ class Canvas(QOpenGLWidget):
             if a in lt and b in lt:
                 ja, jb = lt.index(a), lt.index(b)
                 lt[ja], lt[jb] = b, a
-                a.needs_render = b.needs_render = True
             ia, ib = self.tiles.index(a), self.tiles.index(b)
             self.tiles[ia], self.tiles[ib] = b, a
             self.update()
@@ -495,11 +511,12 @@ class Canvas(QOpenGLWidget):
         self.grabFramebuffer().save(path)
 
     def shutdown(self):
-        self.makeCurrent()
         for tile in self.tiles:
-            tile.close()
-        self.doneCurrent()
+            self._destroy_tile(tile)
         self.tiles.clear()
+        if self.pool is not None:
+            self.pool.stop()
+            self.pool = None
 
 
 def _fmt(seconds: float) -> str:

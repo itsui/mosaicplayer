@@ -63,6 +63,8 @@ def main(argv=None):
         win.load(args.inputs)
 
     if args.quit_after:
+        QTimer.singleShot(int(max(args.quit_after - 10, 1) * 1000), win.canvas.tile_fps)
+
         def finish():
             if args.screenshot and "{n}" not in args.screenshot:
                 win.canvas.save_screenshot(args.screenshot)
@@ -70,6 +72,7 @@ def main(argv=None):
             gpu = sum(1 for t in c.tiles if t.on_gpu)
             info = c.layout_info
             print(f"tiles={len(c.tiles)} gpu={gpu} redraws_per_s={len(c._frame_times)}"
+                  f" tile_fps={c.tile_fps():.1f}"
                   f" coverage={info.coverage if info else 0:.3f}"
                   f" spread={info.size_spread if info else 0:.2f}", flush=True)
             win.close()

@@ -12,6 +12,7 @@ from PySide6.QtGui import QOpenGLContext
 from PySide6.QtOpenGL import QOpenGLFramebufferObject
 
 from .playlist import Entry
+from .render import TileTarget
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,10 @@ END_ACTIONS = {
 
 SCALING = {
     "quality": dict(scale="spline36", dscale="mitchell", cscale="spline36"),
+    # Tiles are nearly always smaller than the video; cheap downscaling keeps
+    # dozens of tiles (and 4K sources) at full frame rate.
+    "balanced": dict(scale="spline36", dscale="bilinear", cscale="bilinear",
+                     correct_downscaling=False, linear_downscaling=False),
     "fast": dict(scale="bilinear", dscale="bilinear", cscale="bilinear",
                  correct_downscaling=False, linear_downscaling=False, sigmoid_upscaling=False),
 }
@@ -110,13 +115,12 @@ class DecoderPolicy:
 
 
 class Tile(QObject):
-    frame_ready = Signal()
     aspect_changed = Signal()
     failed = Signal()
     reached_end = Signal()
 
     def __init__(self, entry: Entry, policy: DecoderPolicy, end_action=LOOP,
-                 scaling="quality", parent=None):
+                 scaling="balanced", parent=None):
         super().__init__(parent)
         self.entry = entry
         self.policy = policy
@@ -127,8 +131,10 @@ class Tile(QObject):
         self.uses_gpu = False
         self.load_mpx = 0.0
         self._ctx: mpv.MpvRenderContext | None = None
-        self._fbo: QOpenGLFramebufferObject | None = None
-        self.needs_render = True
+        self.target = TileTarget()
+        self.worker = None  # RenderWorker that owns this tile's GL objects
+        self.frames_drawn = 0  # for the stats overlay
+        self._dirty = True
         self._paused = bool(entry.paused)
         self._hwdec_current = "no"
         self._resume_at = entry.position  # restore a saved playlist position once
@@ -166,7 +172,7 @@ class Tile(QObject):
             sub_auto="no",
             log_handler=_mpv_log if log.isEnabledFor(logging.DEBUG) else None,
             loglevel="v" if log.isEnabledFor(logging.DEBUG) else "warn",
-            **SCALING.get(scaling, SCALING["quality"]),
+            **SCALING.get(scaling, SCALING["balanced"]),
         )
         self.player.observe_property("video-params", self._on_video_params)
         self.player.observe_property("pause", self._on_pause)
@@ -229,41 +235,69 @@ class Tile(QObject):
     def on_gpu(self) -> bool:
         return self._hwdec_current not in ("no", "")
 
-    # --- rendering (GL thread, context current) -----------------------------
+    # --- rendering (render-worker thread, its GL context current) -----------
 
     def init_gl(self):
         self._ctx = mpv.MpvRenderContext(
             self.player, "opengl",
             opengl_init_params={"get_proc_address": _PROC_ADDRESS_FN},
         )
-        self._ctx.update_cb = self.frame_ready.emit
+        self._ctx.update_cb = self._on_render_update
         if self.player.path is None:
             self.player.play(self.entry.path)
 
-    def render(self, width: int, height: int) -> int | None:
-        """Render a new frame if there is one; returns the FBO id to blit."""
-        if self._ctx is None or width < 1 or height < 1:
-            return None
-        if self._fbo is None or self._fbo.width() != width or self._fbo.height() != height:
-            self._fbo = QOpenGLFramebufferObject(width, height)
-            self.needs_render = True
-        if self._ctx.update() or self.needs_render:
-            # Don't wait for the frame's display time: with dozens of tiles
-            # those waits add up and the whole wall drops frames.
-            self._ctx.render(flip_y=True, block_for_target_time=False,
-                             opengl_fbo={"w": width, "h": height, "fbo": self._fbo.handle()})
-            self.needs_render = False
-        return self._fbo.handle()
+    def _on_render_update(self):
+        self._dirty = True
+        worker = self.worker
+        if worker is not None:
+            worker.wake()
 
-    def report_swap(self):
-        if self._ctx is not None:
-            self._ctx.report_swap()
+    def request_size(self, width: int, height: int):
+        """Called by the window when the layout changes the tile's size."""
+        if self.target.size != (width, height):
+            self.target.size = (width, height)
+            self._dirty = True
+            if self.worker is not None:
+                self.worker.wake()
+
+    def render_into_back(self) -> bool:
+        """Render a new frame into the back buffer. True if something was drawn."""
+        if self._ctx is None:
+            return False
+        width, height = self.target.size
+        if width < 1 or height < 1:
+            return False
+        resized = False
+        back = self.target.back
+        if back is None or back.width() != width or back.height() != height:
+            self.target.back = back = QOpenGLFramebufferObject(width, height)
+            resized = True
+        has_frame = self._ctx.update()
+        if not (has_frame or resized or self._dirty):
+            return False
+        self._dirty = False
+        # Don't wait for the frame's display time: with dozens of tiles those
+        # waits add up and the whole wall drops frames.
+        self._ctx.render(flip_y=False, block_for_target_time=False,
+                         opengl_fbo={"w": width, "h": height, "fbo": back.handle()})
+        return True
+
+    def swap_buffers(self):
+        self.frames_drawn += 1
+        with self.target.lock:
+            self.target.front, self.target.back = self.target.back, self.target.front
+            self.target.has_frame = True
+        # The new back buffer still holds an older frame; re-render it next time
+        # even if mpv has no new frame, so both buffers converge after a resize.
+        self._dirty = self._dirty or self.target.back is None
 
     def release_gl(self):
         if self._ctx is not None:
             self._ctx.free()
             self._ctx = None
-        self._fbo = None
+        with self.target.lock:
+            self.target.front = self.target.back = None
+            self.target.has_frame = False
 
     # --- controls (UI thread) -----------------------------------------------
 
@@ -336,6 +370,6 @@ class Tile(QObject):
             self.player.pause = False
 
     def close(self):
+        """Free the player. GL resources must already be released by the worker."""
         self.policy.release(id(self))
-        self.release_gl()
         self.player.terminate()

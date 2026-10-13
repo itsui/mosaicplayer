@@ -14,7 +14,7 @@ from .layout import LAYOUT_MODES
 from .tile import DECODER_MODES, END_ACTIONS
 
 RELOAD_FIELDS = ("decoder_mode", "hwdec_api", "gpu_budget_mpx", "max_gpu_tiles",
-                 "auto_threshold_mpx", "scaling")
+                 "auto_threshold_mpx", "scaling", "render_threads")
 
 
 def _combo(options: dict, current: str) -> QComboBox:
@@ -85,8 +85,9 @@ class SettingsDialog(QDialog):
         self.max_gpu = QSpinBox(minimum=0, maximum=200, value=c.max_gpu_tiles)
         self.threshold = QSpinBox(minimum=0, maximum=2000, singleStep=10,
                                   value=int(c.auto_threshold_mpx), suffix=" Mpx/s")
-        self.scaling = _combo({"quality": "Quality (spline36 / mitchell)",
-                               "fast": "Fast (bilinear)"}, c.scaling)
+        self.scaling = _combo({"balanced": "Balanced — cheap downscaling (default)",
+                               "quality": "Quality — spline36 / mitchell everywhere",
+                               "fast": "Fast — bilinear everywhere"}, c.scaling)
         form = QFormLayout()
         form.addRow("Decoder", self.decoder_mode)
         form.addRow("GPU API", self.hwdec_api)
@@ -96,6 +97,9 @@ class SettingsDialog(QDialog):
         form.addRow(_note("1080p at 30 fps is about 62 Mpx/s. Each GPU-decoded video also "
                           "costs a few hundred MB of video memory."))
         form.addRow("Scaling", self.scaling)
+        self.render_threads = QSpinBox(minimum=1, maximum=16, value=c.render_threads)
+        form.addRow("Render threads", self.render_threads)
+        form.addRow(_note("More threads keep many tiles smooth; 4 suits ~60 videos."))
         form.addRow(_note("Changing decoder or scaling settings reloads all videos."))
         tabs.addTab(_page(form), "Decoding")
 
@@ -180,6 +184,7 @@ class SettingsDialog(QDialog):
             max_gpu_tiles=self.max_gpu.value(),
             auto_threshold_mpx=float(self.threshold.value()),
             scaling=self.scaling.currentData(),
+            render_threads=self.render_threads.value(),
             titles=self.titles.currentData(),
             hide_cursor_ms=self.hide_cursor.value(),
             stay_on_top=self.on_top.isChecked(),

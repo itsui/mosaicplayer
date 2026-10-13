@@ -32,7 +32,8 @@ class Config:
     gpu_budget_mpx: float = 1200.0
     max_gpu_tiles: int = 24
     auto_threshold_mpx: float = 70.0
-    scaling: str = "quality"
+    scaling: str = "balanced"
+    render_threads: int = 4
 
     # Interface
     titles: str = "hover"  # never / hover / always
