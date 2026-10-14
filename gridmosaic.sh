@@ -28,5 +28,11 @@ DESKTOP
     exit 0
 fi
 
+if [[ ! -x "$VENV/bin/python" ]]; then
+    echo "GridMosaic isn't set up yet (no Python environment at $VENV)." >&2
+    echo "Run: $HERE/gridmosaic.sh --setup" >&2
+    exit 1
+fi
+
 export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
 exec "$VENV/bin/python" -m gridmosaic "$@"

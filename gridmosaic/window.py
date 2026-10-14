@@ -32,8 +32,12 @@ HELP = """<h3>GridMosaic keys</h3><table cellspacing=4>
 <tr><td><b>N</b></td><td>random video from the same folder</td><td><b>S</b></td><td>random positions for all</td></tr>
 <tr><td><b>Y</b></td><td>sync all to hovered video's time</td><td><b>Home</b></td><td>restart all</td></tr>
 <tr><td><b>F</b>, <b>F11</b></td><td>fullscreen</td><td><b>H</b></td><td>stats overlay</td></tr>
+<tr><td><b>T</b></td><td>stay on top</td><td><b>Ctrl+M</b></td><td>show / hide the menu bar</td></tr>
 <tr><td><b>Ctrl+O</b></td><td>open videos</td><td><b>Ctrl+Shift+O</b></td><td>add folder (with subfolders)</td></tr>
-<tr><td><b>Ctrl+S</b></td><td>save playlist</td><td><b>Ctrl+,</b></td><td>settings</td></tr>
+<tr><td><b>Ctrl+L</b></td><td>open playlist</td><td><b>Ctrl+U</b></td><td>open URL</td></tr>
+<tr><td><b>Ctrl+S</b></td><td>save playlist</td><td><b>Ctrl+Shift+S</b></td><td>save playlist as</td></tr>
+<tr><td><b>Ctrl+W</b></td><td>close all videos</td><td><b>Ctrl+Q</b></td><td>quit</td></tr>
+<tr><td><b>Ctrl+,</b></td><td>settings</td><td><b>F1</b>, <b>?</b></td><td>this help</td></tr>
 </table>"""
 
 SPEEDS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0)
