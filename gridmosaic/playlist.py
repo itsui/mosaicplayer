@@ -68,7 +68,8 @@ def is_video(path: str | os.PathLike) -> bool:
 
 
 def read_gpls(path: str | os.PathLike) -> Playlist:
-    lines = [ln.strip() for ln in Path(path).read_text(encoding="utf-8").splitlines()]
+    # utf-8-sig: editors on Windows often add a byte-order mark.
+    lines = [ln.strip() for ln in Path(path).read_text(encoding="utf-8-sig").splitlines()]
     lines = [ln for ln in lines if ln]
     if not lines or lines[0] != GPLS_HEADER:
         raise ValueError(f"{path} is not a GridPlayer playlist")
@@ -150,13 +151,40 @@ def _number(value, default, lo, hi) -> float:
 def read_m3u(path: str | os.PathLike) -> Playlist:
     base = Path(path).parent
     entries = []
-    for ln in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+    for ln in _m3u_lines(Path(path), base):
         ln = ln.strip()
         if not ln or ln.startswith("#"):
             continue
         p = ln if "://" in ln else str((base / ln).resolve())
         entries.append(Entry(p))
     return Playlist(entries)
+
+
+def _m3u_lines(path: Path, base: Path) -> list[str]:
+    """Lines of an .m3u in whatever encoding it uses.
+
+    .m3u8 is UTF-8, but plain .m3u files are often Latin-1/Windows-1252. Lines
+    that aren't UTF-8 are matched against the raw file-name bytes first (so they
+    find the file as it is named on disk), then read as Windows-1252.
+    """
+    data = path.read_bytes().removeprefix(b"\xef\xbb\xbf")
+    try:
+        return data.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        pass
+    lines = []
+    for raw in data.splitlines():
+        try:
+            lines.append(raw.decode("utf-8"))
+            continue
+        except UnicodeDecodeError:
+            pass
+        as_bytes = os.fsdecode(raw.strip())  # keeps undecodable bytes as-is
+        if "://" not in as_bytes and (base / as_bytes).exists():
+            lines.append(as_bytes)
+        else:
+            lines.append(raw.decode("cp1252", errors="replace"))
+    return lines
 
 
 def expand_inputs(inputs) -> tuple[list[Entry], dict]:

@@ -98,3 +98,22 @@ def test_macos_metadata_files_are_not_videos(tmp_path):
     (tmp_path / "clip.mp4").write_bytes(b"")
     entries, _ = expand_inputs([tmp_path])
     assert [e.path.rsplit("/", 1)[1] for e in entries] == ["clip.mp4"]
+
+
+def test_byte_order_marks_and_windows_line_ends(tmp_path):
+    (tmp_path / "a.mp4").write_bytes(b"")
+    gp = tmp_path / "bom.gpls"
+    gp.write_text("#GRIDPLAYER\r\n#P:{}\r\n" + str(tmp_path / "a.mp4") + "\r\n", encoding="utf-8-sig")
+    assert [e.path for e in read_gpls(gp).entries] == [str(tmp_path / "a.mp4")]
+    m3 = tmp_path / "bom.m3u"
+    m3.write_text("#EXTM3U\r\n#EXTINF:-1,Clip\r\na.mp4\r\n", encoding="utf-8-sig")
+    entries, _ = expand_inputs([m3])
+    assert [e.path for e in entries] == [str(tmp_path / "a.mp4")]
+
+
+def test_latin1_m3u(tmp_path):
+    (tmp_path / "vidéo.mp4").write_bytes(b"")  # the file on disk has a UTF-8 name
+    m3 = tmp_path / "old.m3u"
+    m3.write_bytes("#EXTM3U\nvidéo.mp4\n".encode("cp1252"))  # written by an old Windows tool
+    entries, _ = expand_inputs([m3])
+    assert [e.path for e in entries] == [str(tmp_path / "vidéo.mp4")]
