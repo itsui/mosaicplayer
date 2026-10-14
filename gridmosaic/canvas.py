@@ -22,7 +22,8 @@ from .layout import (LayoutResult, Rect, fixed_grid, grid_layout, justified_colu
                      justified_rows, puzzle)
 from .playlist import Entry, siblings
 from .render import RenderPool
-from .tile import NEXT, RANDOM, DecoderPolicy, Tile
+from .options import NEXT, RANDOM
+from .tile import DecoderPolicy, Tile
 
 GL_COLOR_BUFFER_BIT = 0x4000
 

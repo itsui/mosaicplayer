@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDia
 
 from .config import Config
 from .layout import BALANCE_MODES, LAYOUT_MODES
-from .tile import DECODER_MODES, END_ACTIONS
+from .options import DECODER_MODES, END_ACTIONS
 
 RELOAD_FIELDS = ("decoder_mode", "hwdec_api", "gpu_budget_mpx", "max_gpu_tiles",
                  "auto_threshold_mpx", "scaling", "render_threads")

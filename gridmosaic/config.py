@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, fields
 
 from PySide6.QtCore import QSettings
 
-from .tile import AUTO, LOOP
+from .options import AUTO, LOOP
 
 CONFIG_VERSION = 2
 

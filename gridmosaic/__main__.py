@@ -13,7 +13,7 @@ from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
 from .layout import LAYOUT_MODES
-from .tile import DECODER_MODES
+from .options import DECODER_MODES
 
 
 def limit_malloc_arenas(arenas=4):
@@ -93,7 +93,16 @@ def main(argv=None):
     locale.setlocale(locale.LC_NUMERIC, "C")  # libmpv requires this; Qt resets it
 
     from .config import Config  # after QApplication
-    from .window import MainWindow
+    try:
+        from .window import MainWindow  # loads libmpv
+    except OSError as e:
+        if "mpv" not in str(e).lower():
+            raise
+        print("GridMosaic needs the mpv library (libmpv), which wasn't found.\n"
+              "Install it, e.g. 'sudo apt install libmpv2' (Debian/Ubuntu/Mint) or\n"
+              "'sudo dnf install mpv-libs' (Fedora), then start GridMosaic again.",
+              file=sys.stderr)
+        return 1
 
     cfg = Config.load()
     if args.layout:

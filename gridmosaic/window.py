@@ -16,7 +16,7 @@ from .config import Config
 from .layout import BALANCE_MODES, LAYOUT_MODES
 from .playlist import PLAYLIST_EXTENSIONS, Entry, Playlist, expand_inputs, is_video, write_gpls
 from .settings_dialog import RELOAD_FIELDS, SettingsDialog
-from .tile import END_ACTIONS
+from .options import END_ACTIONS
 
 HELP = """<h3>GridMosaic keys</h3><table cellspacing=4>
 <tr><td><b>Space</b></td><td>pause / play all</td><td><b>Click</b></td><td>pause one</td></tr>

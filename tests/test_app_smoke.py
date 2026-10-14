@@ -60,7 +60,7 @@ def window(app, tmp_path, monkeypatch):
 def test_full_session(app, window, clips, tmp_path):
     from gridmosaic.layout import LAYOUT_MODES
     from gridmosaic.playlist import read_gpls
-    from gridmosaic.tile import END_ACTIONS
+    from gridmosaic.options import END_ACTIONS
 
     c = window.canvas
     window.load([clips])
