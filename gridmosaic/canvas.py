@@ -117,6 +117,14 @@ class Canvas(QOpenGLWidget):
         if tile in self._unassigned:
             self._unassigned.remove(tile)
         tile.close()
+        # The canvas is the tile's Qt parent, which would keep it (and its
+        # player wrapper) alive forever; detach and delete it.
+        for signal in (tile.aspect_changed, tile.failed, tile.reached_end):
+            signal.disconnect()
+        tile.setParent(None)
+        tile.deleteLater()
+        if self.hovered is tile:
+            self.hovered = None
 
     def remove_tile(self, tile: Tile):
         if tile not in self.tiles:

@@ -183,6 +183,22 @@ def test_stop_at_end_then_play_restarts(app, window, clips):
     assert not tile.paused and pos < 1.5
 
 
+def test_closed_tiles_are_freed(app, window, clips):
+    import gc
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from gridmosaic.tile import Tile
+    c = window.canvas
+    for _ in range(3):
+        window.load([clips])
+        pump(app, 1.5)
+        window.close_all()
+        pump(app, 0.3)
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
+    assert not c.findChildren(Tile)
+    assert sum(isinstance(o, Tile) for o in gc.get_objects()) <= 6  # not 18
+
+
 def test_overlay_timer_idles(app, window, clips):
     c = window.canvas
     window.load([clips])

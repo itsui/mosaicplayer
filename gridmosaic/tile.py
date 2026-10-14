@@ -355,9 +355,14 @@ class Tile(QObject):
 
     def seek_to(self, seconds: float, exact=False):
         """Seek to a time. Keyframe seeks are fast; ``exact`` lands on the frame."""
+        duration = self.player.duration
+        if duration:  # past the end (e.g. syncing to a longer video): go near the end
+            seconds = min(seconds, max(duration - 0.05, 0.0))
         self._seek(max(0.0, seconds), "absolute", "exact" if exact else "keyframes")
 
     def _seek(self, amount, reference, precision):
+        if self.error or self.player.duration is None:
+            return  # nothing playable (yet) to seek in
         try:
             self.player.seek(amount, reference, precision)
         except SystemError as e:  # e.g. nothing loaded yet; not worth a crash
@@ -410,4 +415,5 @@ class Tile(QObject):
     def close(self):
         """Free the player. GL resources must already be released by the worker."""
         self.policy.release(id(self))
+        self.error = self.error or "closed"  # any late call becomes a no-op
         self.player.terminate()
