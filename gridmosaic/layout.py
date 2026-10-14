@@ -592,9 +592,9 @@ class _EqualAreaSearch:
                 c2 = tuple(a - b for a, b in zip(counts, c1))
                 fair = self._weight(c1) / self._weight(counts)
                 for f in self._fractions():
-                    share = fair * f
-                    if not 0.02 < share < 0.98:
-                        continue
+                    # Extreme size weights could push a side below 2% of the
+                    # space; clamp instead of skipping so a split always exists.
+                    share = min(max(fair * f, 0.02), 0.98)
                     penalty = self._imbalance(f, k1, k - k1)
                     for op in ops:
                         if op == "H":

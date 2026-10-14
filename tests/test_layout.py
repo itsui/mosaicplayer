@@ -206,3 +206,9 @@ def test_puzzle_abort_returns_none_quickly():
                     abort=lambda: time.perf_counter() - start > 0.15)
     assert result is None
     assert time.perf_counter() - start < 1.5
+
+
+@pytest.mark.parametrize("weights", [[10.0, 0.1], [6.0, 0.25], [6.0] + [0.25] * 7])
+def test_extreme_weights_still_lay_out(weights):
+    result = equal_area_layout([LANDSCAPE] * len(weights), 1920, 1080, weights=weights)
+    _assert_valid(result, len(weights), 1920, 1080)

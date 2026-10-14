@@ -27,7 +27,7 @@ VIDEO_EXTENSIONS = frozenset(
 )
 PLAYLIST_EXTENSIONS = frozenset({".gpls", ".m3u", ".m3u8"})
 GPLS_HEADER = "#GRIDPLAYER"
-MIN_WEIGHT, MAX_WEIGHT = 0.1, 10.0
+MIN_WEIGHT, MAX_WEIGHT = 0.25, 6.0  # a little beyond the UI's 0.35–4 steps
 
 
 @dataclass

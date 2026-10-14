@@ -81,7 +81,7 @@ def test_damaged_playlist_lines_are_skipped(tmp_path):
     pl = read_gpls(p)
     assert [e.path for e in pl.entries] == ["/a.mp4", "/b.mp4", "/c.mp4"]
     assert pl.params == {}
-    assert pl.entries[1].size_weight == 0.1  # clamped: zero would break the layout
+    assert pl.entries[1].size_weight == 0.25  # clamped: zero would break the layout
     assert pl.entries[2].rate == 1.0 and pl.entries[2].position == 0.0
 
 
