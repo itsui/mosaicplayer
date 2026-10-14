@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QInputDialog, QLabel, QMain
 from . import __version__
 from .canvas import Canvas
 from .config import Config
-from .layout import LAYOUT_MODES
+from .layout import BALANCE_MODES, LAYOUT_MODES
 from .playlist import Entry, Playlist, expand_inputs, is_video, write_gpls
 from .settings_dialog import RELOAD_FIELDS, SettingsDialog
 from .tile import END_ACTIONS
@@ -26,6 +26,7 @@ HELP = """<h3>GridMosaic keys</h3><table cellspacing=4>
 <tr><td><b>Drag</b> a video</td><td>swap it with another</td><td><b>Del</b></td><td>remove hovered video</td></tr>
 <tr><td><b>1</b>–<b>5</b></td><td>puzzle, rows, columns, grid, fixed grid</td><td><b>R</b></td><td>reshuffle puzzle</td></tr>
 <tr><td><b>C</b></td><td>allow cropping on / off</td><td><b>[ ]</b></td><td>gap smaller / bigger</td></tr>
+<tr><td><b>B</b></td><td>puzzle tile sizes: equal / balanced / fill</td><td></td><td></td></tr>
 <tr><td><b>N</b></td><td>random video from the same folder</td><td><b>S</b></td><td>random positions for all</td></tr>
 <tr><td><b>Y</b></td><td>sync all to hovered video's time</td><td><b>Home</b></td><td>restart all</td></tr>
 <tr><td><b>F</b>, <b>F11</b></td><td>fullscreen</td><td><b>H</b></td><td>stats overlay</td></tr>
@@ -152,6 +153,15 @@ class MainWindow(QMainWindow):
                             checkable=True, checked=self.cfg.layout_mode == key)
             group.addAction(act)
             self.mode_actions[key] = act
+        sizes = m.addMenu("Puzzle tile sizes")
+        group = QActionGroup(self)
+        self.balance_actions = {}
+        for key, label in BALANCE_MODES.items():
+            act = self._act(sizes, label, lambda on, k=key: on and self.set_balance(k),
+                            checkable=True, checked=self.cfg.size_balance == key)
+            group.addAction(act)
+            self.balance_actions[key] = act
+        self._act(None, "Cycle tile sizes", self.cycle_balance, ["B"])
         m.addSeparator()
         self._act(m, "Reshuffle puzzle", lambda: c.schedule_relayout(reshuffle=True), ["R"])
         self._act(m, "Shuffle playlist order", c.shuffle_order)
@@ -357,6 +367,7 @@ class MainWindow(QMainWindow):
         self.mode_actions[self.cfg.layout_mode].setChecked(True)
         self.end_actions[self.cfg.end_action].setChecked(True)
         self.crop_action.setChecked(self.cfg.max_crop > 0)
+        self.balance_actions[self.cfg.size_balance].setChecked(True)
         self.canvas.set_all_end_action(self.cfg.end_action)
         self._apply_window_config()
         self.canvas.schedule_relayout()
@@ -378,6 +389,20 @@ class MainWindow(QMainWindow):
         self.canvas.schedule_relayout()
         self.toast(LAYOUT_MODES[mode])
 
+    def set_balance(self, balance: str):
+        self.cfg.size_balance = balance
+        self.cfg.save()
+        self.balance_actions[balance].setChecked(True)
+        if self.cfg.layout_mode != "puzzle":
+            self.mode_actions["puzzle"].setChecked(True)
+            self.cfg.layout_mode = "puzzle"
+        self.canvas.schedule_relayout()
+        self.toast(BALANCE_MODES[balance])
+
+    def cycle_balance(self):
+        keys = list(BALANCE_MODES)
+        self.set_balance(keys[(keys.index(self.cfg.size_balance) + 1) % len(keys)])
+
     def ask_fixed_grid(self):
         cols, ok = QInputDialog.getInt(self, "Fixed grid", "Columns (0 = automatic):",
                                        self.cfg.fixed_cols, 0, 20)
@@ -392,10 +417,10 @@ class MainWindow(QMainWindow):
         self.set_layout_mode("fixed-grid")
 
     def set_crop(self, on: bool):
-        self.cfg.max_crop = 0.12 if on else 0.0
+        self.cfg.max_crop = 0.15 if on else 0.0
         self.cfg.save()
         self.canvas.schedule_relayout()
-        self.toast("Cropping up to 12% to fill gaps" if on else "No cropping (may leave gaps)")
+        self.toast("Cropping up to 15% to fill gaps" if on else "No cropping (may leave gaps)")
 
     def set_gap(self, gap: int):
         self.cfg.gap = max(0, min(gap, 40))

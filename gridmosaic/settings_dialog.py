@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDia
                                QTabWidget, QVBoxLayout, QWidget)
 
 from .config import Config
-from .layout import LAYOUT_MODES
+from .layout import BALANCE_MODES, LAYOUT_MODES
 from .tile import DECODER_MODES, END_ACTIONS
 
 RELOAD_FIELDS = ("decoder_mode", "hwdec_api", "gpu_budget_mpx", "max_gpu_tiles",
@@ -49,8 +49,8 @@ class SettingsDialog(QDialog):
         self.max_crop = QSpinBox(minimum=0, maximum=30, value=round(c.max_crop * 100), suffix=" %")
         self.fixed_cols = QSpinBox(minimum=0, maximum=20, value=c.fixed_cols, specialValueText="auto")
         self.fixed_rows = QSpinBox(minimum=0, maximum=20, value=c.fixed_rows, specialValueText="auto")
-        self.evenness = QDoubleSpinBox(minimum=0.0, maximum=4.0, singleStep=0.25, value=c.evenness)
-        self.effort = QDoubleSpinBox(minimum=0.2, maximum=5.0, singleStep=0.2,
+        self.balance = _combo(BALANCE_MODES, c.size_balance)
+        self.effort = QDoubleSpinBox(minimum=0.2, maximum=10.0, singleStep=0.5,
                                      value=c.layout_effort, suffix=" s")
         form = QFormLayout()
         form.addRow("Packing mode", self.layout_mode)
@@ -60,7 +60,9 @@ class SettingsDialog(QDialog):
                           "screen with no black bars. 0% never crops."))
         form.addRow("Fixed grid columns", self.fixed_cols)
         form.addRow("Fixed grid rows", self.fixed_rows)
-        form.addRow("Puzzle: equal sizes vs. fill", self.evenness)
+        form.addRow("Puzzle: tile sizes", self.balance)
+        form.addRow(_note("Equal gives every video the same area; allowing ~15% crop lets it "
+                          "fill the screen. Fill first covers more but sizes vary."))
         form.addRow("Puzzle: search time", self.effort)
         tabs.addTab(_page(form), "Layout")
 
@@ -172,7 +174,7 @@ class SettingsDialog(QDialog):
             max_crop=self.max_crop.value() / 100,
             fixed_cols=self.fixed_cols.value(),
             fixed_rows=self.fixed_rows.value(),
-            evenness=self.evenness.value(),
+            size_balance=self.balance.currentData(),
             layout_effort=self.effort.value(),
             end_action=self.end_action.currentData(),
             start_muted=self.start_muted.isChecked(),

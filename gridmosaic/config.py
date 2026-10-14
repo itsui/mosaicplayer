@@ -8,17 +8,19 @@ from PySide6.QtCore import QSettings
 
 from .tile import AUTO, LOOP
 
+CONFIG_VERSION = 2
+
 
 @dataclass
 class Config:
     # Layout
     layout_mode: str = "puzzle"
     gap: int = 2
-    max_crop: float = 0.12
+    max_crop: float = 0.15
     fixed_cols: int = 0  # 0 = automatic
     fixed_rows: int = 0
-    layout_effort: float = 1.2  # seconds spent refining the puzzle layout
-    evenness: float = 1.0  # puzzle: how strongly to equalise tile sizes
+    size_balance: str = "equal"  # puzzle: equal / balanced / fill
+    layout_effort: float = 2.5  # seconds the puzzle may spend refining in the background
 
     # Playback
     start_muted: bool = True
@@ -59,12 +61,21 @@ class Config:
             raw = store.value(f.name)
             default = getattr(cfg, f.name)
             setattr(cfg, f.name, _coerce(raw, default))
+        version = int(store.value("config_version", 1))
+        if version < 2:
+            # v2: equal-area puzzle. Move values still at the old defaults.
+            if abs(cfg.max_crop - 0.12) < 1e-9:
+                cfg.max_crop = 0.15
+            if abs(cfg.layout_effort - 1.2) < 1e-9:
+                cfg.layout_effort = 2.5
         return cfg
 
     def save(self) -> None:
         store = QSettings("gridmosaic", "gridmosaic")
         for f in fields(self):
             store.setValue(f.name, getattr(self, f.name))
+        store.setValue("config_version", CONFIG_VERSION)
+        store.remove("evenness")  # replaced by size_balance in v2
         store.sync()
 
     def add_recent(self, path: str) -> None:

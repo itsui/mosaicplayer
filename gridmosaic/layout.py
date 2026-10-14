@@ -455,3 +455,311 @@ LAYOUT_MODES = {
     "grid": "Auto grid — equal cells, best column count",
     "fixed-grid": "Fixed grid — your rows × columns",
 }
+
+
+# --- Equal-area puzzle ------------------------------------------------------
+#
+# Every split divides its rectangle in proportion to the number of videos on
+# each side (optionally nudged by up to ``slack``), so tiles get the same area
+# by construction. The search decides the split direction, the split point and
+# which videos go to each side so that every leaf's shape matches its video
+# within the crop allowance. Videos are grouped into a few shape classes, so
+# the search can memoise on (rectangle shape, videos per class) and stays fast.
+
+_SHAPE_TOLERANCE = 0.06  # videos whose log-aspects differ less share a class
+_ASPECT_BINS = 32  # memo resolution: bins per unit of log-aspect
+MAX_SHAPE_CLASSES = 4
+_BIG_GROUP = 8  # above this many videos, only near-even, fair-share splits are tried
+
+
+def _shape_classes(aspects):
+    order = sorted(range(len(aspects)), key=lambda i: aspects[i])
+    classes: list[list[int]] = []
+    for i in order:
+        if classes and math.log(aspects[i]) - math.log(aspects[classes[-1][0]]) < _SHAPE_TOLERANCE:
+            classes[-1].append(i)
+        else:
+            classes.append([i])
+    # The search grows quickly with the number of classes: merge the two
+    # closest neighbours until at most MAX_SHAPE_CLASSES remain. Rare odd shapes
+    # then just get a little more cropping.
+    def rep(c):
+        return sum(math.log(aspects[i]) for i in c) / len(c)
+    while len(classes) > MAX_SHAPE_CLASSES:
+        gaps = [(rep(classes[j + 1]) - rep(classes[j])) * min(len(classes[j]), len(classes[j + 1]))
+                for j in range(len(classes) - 1)]
+        j = gaps.index(min(gaps))
+        classes[j:j + 2] = [classes[j] + classes[j + 1]]
+    reps = [math.exp(rep(c)) for c in classes]
+    return classes, reps
+
+
+class _EqualAreaSearch:
+    def __init__(self, reps, max_crop, slack, crop_cost, time_budget=math.inf,
+                 big_group=_BIG_GROUP, memo=None):
+        self.reps = reps
+        self.big_group = big_group
+        self.deadline = time.perf_counter() + time_budget
+        self.calls = 0
+        self.crop_limit = -math.log(1.0 - max_crop) if max_crop > 0 else 0.0
+        self.crop_cost = crop_cost
+        self.slack = slack
+        # Entries are exact results for (shape bin, counts) and don't depend on
+        # the screen, so the memo is shared across calls (see _memo_for).
+        self.memo: dict = {} if memo is None else memo
+
+    def leaf_cost(self, aspect, cls):
+        d = abs(math.log(aspect / self.reps[cls]))
+        if d <= self.crop_limit:
+            return self.crop_cost * (1.0 - math.exp(-d))
+        # Beyond the crop limit the tile is letterboxed: lose that share of area.
+        over = d - self.crop_limit
+        return self.crop_cost * (1.0 - math.exp(-self.crop_limit)) + 1.5 * (1.0 - math.exp(-over))
+
+    def best(self, aspect, counts):
+        """Lowest cost (per tile, summed) to fill a rect of this aspect with ``counts``."""
+        key = (round(math.log(aspect) * _ASPECT_BINS), counts)
+        hit = self.memo.get(key)
+        if hit is not None:
+            return hit
+        self.calls += 1
+        if self.calls % 4096 == 0 and time.perf_counter() > self.deadline:
+            raise TimeoutError
+        k = sum(counts)
+        if k == 1:
+            cls = counts.index(1)
+            result = (self.leaf_cost(aspect, cls), ("leaf", cls))
+            self.memo[key] = result
+            return result
+        best = (math.inf, None)
+        good_enough = 0.004 * k  # near-perfect fill: stop looking
+        # Split along the long side first; it is almost always the better cut.
+        ops = ("H", "V") if aspect >= 1.0 else ("V", "H")
+        big = k > self.big_group
+        for k1 in _split_sizes(k, big):
+            exhaustive = not big and (min(k1, k - k1) <= 3 or k <= 8)
+            for c1 in _sub_counts(counts, k1, exhaustive=exhaustive, window=0 if big else 2):
+                c2 = tuple(a - b for a, b in zip(counts, c1))
+                for f in self._fractions():
+                    share = k1 / k * f
+                    if not 0.02 < share < 0.98:
+                        continue
+                    penalty = self._imbalance(f, k1, k - k1)
+                    for op in ops:
+                        if op == "H":
+                            a1, a2 = aspect * share, aspect * (1 - share)
+                        else:
+                            a1, a2 = aspect / share, aspect / (1 - share)
+                        first = penalty + self.best(a1, c1)[0]
+                        if first >= best[0]:
+                            continue  # can't beat what we have
+                        cost = first + self.best(a2, c2)[0]
+                        if cost < best[0]:
+                            best = (cost, (op, share, c1, c2))
+                    if best[0] <= good_enough:
+                        self.memo[key] = best
+                        return best
+        self.memo[key] = best
+        return best
+
+    def _fractions(self):
+        if self.slack <= 0:
+            return (1.0,)
+        s = self.slack
+        return (1.0, 1 - s, 1 + s)
+
+    @staticmethod
+    def _imbalance(f, k1, k2):
+        # Tiles on each side grow/shrink by f and (1 - f*k1/k)/(k2/k); cost the
+        # size change so exact equality wins unless it buys real coverage.
+        return 0.0 if f == 1.0 else 0.15 * abs(math.log(f)) * (k1 + k2) / 4
+
+    def build(self, aspect, counts):
+        """Reconstruct the chosen tree as nested (op, share, left, right) / ("leaf", cls)."""
+        _, choice = self.best(aspect, counts)
+        if choice[0] == "leaf":
+            return choice
+        op, share, c1, c2 = choice
+        if op == "H":
+            return (op, share, self.build(aspect * share, c1), self.build(aspect * (1 - share), c2))
+        return (op, share, self.build(aspect / share, c1), self.build(aspect / (1 - share), c2))
+
+
+def _split_sizes(k, big=False):
+    """Candidate sizes for the first group, most promising (near-halves) first.
+
+    Big groups only split near the middle (or in thirds); the lopsided splits
+    that fit an odd video beside a stack matter lower down the tree.
+    """
+    if big:
+        order = [k // 2, (k + 1) // 2, k // 3, (2 * k) // 3, (k + 1) // 3, (2 * k + 2) // 3]
+    else:
+        order = [k // 2, (k + 1) // 2, k // 3, (2 * k) // 3, 1, k - 1, 2, k - 2, 3, k - 3]
+    seen, sizes = set(), []
+    for s in order:
+        if 1 <= s <= k - 1 and s not in seen:
+            seen.add(s)
+            sizes.append(s)
+    return sizes
+
+
+def _sub_counts(counts, total, exhaustive=True, window=2):
+    """Ways to take ``total`` items from the classes in ``counts``.
+
+    For big groups only near-proportional takes are tried (each class within
+    ``window`` of its fair share); good equal-area splits are always near that.
+    The fair share comes first so good solutions are found early.
+    """
+    k = sum(counts)
+    ranges = []
+    for c in counts:
+        fair = c * total / k
+        if exhaustive:
+            lo, hi = 0, c
+        else:
+            lo, hi = max(0, math.floor(fair) - window), min(c, math.ceil(fair) + window)
+        ranges.append(sorted(range(lo, hi + 1), key=lambda t, fair=fair: abs(t - fair)))
+
+    def rec(i, remaining):
+        if i == len(counts) - 1:
+            if remaining in ranges[i]:
+                yield (remaining,)
+            return
+        for take in ranges[i]:
+            if take > remaining:
+                continue
+            for rest in rec(i + 1, remaining - take):
+                yield (take, *rest)
+    yield from rec(0, total)
+
+
+def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.0,
+                      crop_cost=0.5, time_budget=math.inf, big_group=_BIG_GROUP,
+                      seed=0) -> LayoutResult | None:
+    """Puzzle where every video gets (nearly) the same area.
+
+    ``balance`` 1.0 forces exactly equal areas; lower values let each split
+    deviate from equal by up to (1 - balance) to cover more of the screen.
+    Returns None if the search runs past ``time_budget`` seconds.
+    """
+    n = len(aspects)
+    if n == 0:
+        return LayoutResult([], 0.0, 1.0, 0.0)
+    if n == 1:
+        return grid_layout(aspects, width, height, gap)
+    classes, reps = _shape_classes(aspects)
+    # Round class shapes slightly so near-identical sets share a cached memo.
+    reps = [math.exp(round(math.log(r), 2)) for r in reps]
+    slack = max(0.0, min(1.0 - balance, 0.6))
+    memo = _memo_for((tuple(reps), round(max_crop, 3), slack, crop_cost, big_group))
+    search = _EqualAreaSearch(reps, max_crop, slack, crop_cost, time_budget, big_group, memo)
+    try:
+        tree = search.build(width / height, tuple(len(c) for c in classes))
+    except TimeoutError:
+        return None
+    pools = [list(c) for c in classes]
+    if seed:  # reshuffle: same shapes, different videos in each slot
+        rng = random.Random(seed)
+        for pool in pools:
+            rng.shuffle(pool)
+    rects: list[Rect | None] = [None] * n
+    keep = 1.0 - max_crop
+    _place_equal(tree, 0.0, 0.0, float(width), float(height), gap, pools, aspects, keep, rects)
+    return _finish(rects, aspects, width, height)
+
+
+_MEMOS: dict = {}  # search memos by (shapes, crop, slack, cost, big_group), most recent last
+_MEMO_LIMIT = 6
+
+
+def _memo_for(key) -> dict:
+    """Shared memo for a search setup. Adding a video or resizing the window
+    then reuses nearly all earlier work, and a search that ran out of time
+    resumes where it stopped on the next call."""
+    memo = _MEMOS.pop(key, None)
+    if memo is None:
+        memo = {}
+    _MEMOS[key] = memo
+    while len(_MEMOS) > _MEMO_LIMIT:
+        _MEMOS.pop(next(iter(_MEMOS)))
+    return memo
+
+
+def _place_equal(node, x, y, w, h, gap, pools, aspects, keep, rects):
+    if node[0] == "leaf":
+        idx = pools[node[1]].pop(0)
+        a = aspects[idx]
+        shown = w / h
+        # Letterbox if the slot is more off-shape than cropping allows.
+        if shown > a / keep:
+            nw = h * a / keep
+            x, w = x + (w - nw) / 2, nw
+        elif shown < a * keep:
+            nh = w / (a * keep)
+            y, h = y + (h - nh) / 2, nh
+        rects[idx] = Rect(x, y, max(w, 1.0), max(h, 1.0))
+        return
+    op, share, left, right = node
+    if op == "H":
+        inner = max(w - gap, 1.0)
+        w1 = inner * share
+        _place_equal(left, x, y, w1, h, gap, pools, aspects, keep, rects)
+        _place_equal(right, x + w1 + gap, y, inner - w1, h, gap, pools, aspects, keep, rects)
+    else:
+        inner = max(h - gap, 1.0)
+        h1 = inner * share
+        _place_equal(left, x, y, w, h1, gap, pools, aspects, keep, rects)
+        _place_equal(right, x, y + h1 + gap, w, inner - h1, gap, pools, aspects, keep, rects)
+
+
+# --- Puzzle entry point -------------------------------------------------------
+
+BALANCE_MODES = {
+    "equal": "Equal — every video gets the same area",
+    "balanced": "Balanced — sizes may differ a little to fill more",
+    "fill": "Fill first — cover the screen, sizes vary more",
+}
+# How much a 2x size difference is worth in screen coverage, per mode.
+_SPREAD_WEIGHT = {"equal": 0.3, "balanced": 0.12, "fill": 0.03}
+
+
+def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed=0,
+           time_budget=1.2, quick=False) -> LayoutResult:
+    """Best puzzle layout for the chosen size balance within ``time_budget``.
+
+    Equal and balanced modes use the equal-area search (exact sizes, or sizes
+    within ±15% per split for balanced); fill mode, and any search that runs
+    out of time, uses the annealing search. The candidate with the best
+    coverage/size-spread trade-off for the mode wins.
+    """
+    n = len(aspects)
+    if n <= 1:
+        return grid_layout(aspects, width, height, gap)
+    deadline = time.perf_counter() + time_budget
+    weight = _SPREAD_WEIGHT.get(balance, 0.3)
+
+    def score(r):
+        return r.coverage - weight * math.log2(max(r.size_spread, 1.0))
+
+    candidates = []
+    if balance in ("equal", "balanced"):
+        plans = [(_BIG_GROUP, 0.0)]
+        if balance == "balanced":
+            plans.append((_BIG_GROUP, 0.15))
+        if not quick:
+            plans.append((12, 0.0))  # deeper exact search, if time allows
+        for big, slack in plans:
+            left = deadline - time.perf_counter()
+            if left <= 0:
+                break
+            r = equal_area_layout(aspects, width, height, gap, max_crop, 1.0 - slack,
+                                  time_budget=left, big_group=big, seed=seed)
+            if r is not None:
+                candidates.append(r)
+    if not candidates or balance == "fill":
+        left = max(deadline - time.perf_counter(), 0.08)
+        evenness = {"fill": 0.6, "balanced": 1.0}.get(balance, 1.5)
+        candidates.append(puzzle_layout(aspects, width, height, gap=gap, max_crop=max_crop,
+                                        evenness=evenness, seed=seed, time_budget=left,
+                                        restarts=1 if quick else 4))
+    return max(candidates, key=score)

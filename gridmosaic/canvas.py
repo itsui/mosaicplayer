@@ -19,14 +19,14 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from .config import Config
 from .layout import (LayoutResult, Rect, fixed_grid, grid_layout, justified_columns,
-                     justified_rows, puzzle_layout)
+                     justified_rows, puzzle)
 from .playlist import Entry, siblings
 from .render import RenderPool
 from .tile import NEXT, RANDOM, DecoderPolicy, Tile
 
 GL_COLOR_BUFFER_BIT = 0x4000
 
-QUICK_BUDGET_S = 0.08  # first puzzle layout, computed on the UI thread
+QUICK_BUDGET_S = 0.12  # first puzzle layout, computed on the UI thread
 ANIMATION_S = 0.28  # tiles glide to new places when the layout changes
 SIZE_WAIT_S = 2.0  # how long new videos may hold the layout while reporting their size
 DRAG_THRESHOLD_PX = 12
@@ -205,12 +205,12 @@ class Canvas(QOpenGLWidget):
         elif mode == "columns":
             result = justified_columns(aspects, w, h, gap=gap, max_crop=c.max_crop)
         else:
-            args = dict(gap=gap, max_crop=c.max_crop, evenness=c.evenness, seed=self._seed)
-            self._apply_layout(generation, (tiles, puzzle_layout(
-                aspects, w, h, time_budget=QUICK_BUDGET_S, restarts=1, **args)))
+            args = dict(gap=gap, max_crop=c.max_crop, balance=c.size_balance, seed=self._seed)
+            self._apply_layout(generation, (tiles, puzzle(
+                aspects, w, h, time_budget=QUICK_BUDGET_S, quick=True, **args)))
 
             def refine():
-                refined = puzzle_layout(aspects, w, h, time_budget=c.layout_effort, **args)
+                refined = puzzle(aspects, w, h, time_budget=c.layout_effort, **args)
                 try:
                     self._layout_done.emit(generation, (tiles, refined))
                 except RuntimeError:
@@ -317,7 +317,7 @@ class Canvas(QOpenGLWidget):
         p.setFont(small)
         cursor_visible = self.cursor().shape() != Qt.BlankCursor
         for tile, rect in zip(self._layout_tiles, self.rects):
-            r = self._logical(rect)
+            r = self._logical(self._shown_rect(tile, rect))
             if tile.error:
                 p.fillRect(r, QColor(40, 10, 10))
                 p.setPen(QColor(255, 140, 140))
@@ -389,14 +389,14 @@ class Canvas(QOpenGLWidget):
 
     def tile_at(self, pos: QPointF) -> Tile | None:
         for tile, rect in zip(self._layout_tiles, self.rects):
-            if self._logical(rect).contains(pos):
+            if self._logical(self._shown_rect(tile, rect)).contains(pos):
                 return tile
         return None
 
     def _rect_of(self, tile: Tile) -> QRectF | None:
         for t, rect in zip(self._layout_tiles, self.rects):
             if t is tile:
-                return self._logical(rect)
+                return self._logical(self._shown_rect(t, rect))
         return None
 
     def mouseMoveEvent(self, event):

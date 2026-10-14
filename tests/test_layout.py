@@ -1,10 +1,11 @@
 import itertools
 import random
+import time
 
 import pytest
 
-from gridmosaic.layout import (fixed_grid, grid_layout, justified_columns, justified_rows,
-                               puzzle_layout)
+from gridmosaic.layout import (equal_area_layout, fixed_grid, grid_layout, justified_columns,
+                               justified_rows, puzzle, puzzle_layout)
 
 EPS = 1e-6
 PORTRAIT, LANDSCAPE, OLD_TV = 9 / 16, 16 / 9, 4 / 3
@@ -108,3 +109,45 @@ def test_fixed_grid_respects_shape():
     result = fixed_grid(aspects, 1920, 1080, cols=5, rows=2)
     _assert_valid(result, 10, 1920, 1080)
     assert len({round(r.y) for r in result.rects}) == 2
+
+
+@pytest.mark.parametrize("n", [2, 5, 13, 32])
+@pytest.mark.parametrize("screen", [(3840, 2160), (1080, 1920)])
+def test_equal_area_layout_valid(n, screen):
+    aspects = _mixed(n, seed=n + 3)
+    result = equal_area_layout(aspects, *screen, gap=2, max_crop=0.15)
+    _assert_valid(result, n, *screen)
+    assert result.max_crop <= 0.15 + 1e-6
+
+
+def test_equal_area_gives_even_sizes():
+    aspects = [LANDSCAPE] * 17 + [PORTRAIT] * 12 + [OLD_TV] * 2 + [3 / 4]
+    equal = equal_area_layout(aspects, 3840, 2160, max_crop=0.15)
+    assert equal.coverage > 0.93
+    assert equal.size_spread < 1.5
+    fill = puzzle_layout(aspects, 3840, 2160, time_budget=60, max_iters=6000)
+    assert equal.size_spread < fill.size_spread
+
+
+@pytest.mark.parametrize("balance", ["equal", "balanced", "fill"])
+def test_puzzle_modes_valid(balance):
+    aspects = _mixed(20, seed=11)
+    result = puzzle(aspects, 1920, 1080, gap=2, max_crop=0.15, balance=balance, time_budget=0.6)
+    _assert_valid(result, 20, 1920, 1080)
+
+
+def test_equal_area_reuses_work_between_calls():
+    aspects = _mixed(40, seed=5)
+    equal_area_layout(aspects, 1920, 1080, max_crop=0.15)
+    start = time.perf_counter()
+    equal_area_layout(aspects, 1600, 1000, max_crop=0.15)  # resized window
+    assert time.perf_counter() - start < 0.5
+
+
+def test_equal_area_reshuffle_keeps_shapes():
+    aspects = [LANDSCAPE] * 6 + [PORTRAIT] * 3
+    a = equal_area_layout(aspects, 1920, 1080, seed=0)
+    b = equal_area_layout(aspects, 1920, 1080, seed=7)
+    assert sorted((round(r.w), round(r.h)) for r in a.rects) == \
+        sorted((round(r.w), round(r.h)) for r in b.rects)
+    assert a.rects != b.rects
