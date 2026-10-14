@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,6 +27,7 @@ VIDEO_EXTENSIONS = frozenset(
 )
 PLAYLIST_EXTENSIONS = frozenset({".gpls", ".m3u", ".m3u8"})
 GPLS_HEADER = "#GRIDPLAYER"
+MIN_WEIGHT, MAX_WEIGHT = 0.1, 10.0
 
 
 @dataclass
@@ -60,7 +62,9 @@ class Playlist:
 
 
 def is_video(path: str | os.PathLike) -> bool:
-    return Path(path).suffix.lower() in VIDEO_EXTENSIONS
+    name = Path(path).name
+    # "._name.mp4" files are macOS metadata, not videos.
+    return Path(path).suffix.lower() in VIDEO_EXTENSIONS and not name.startswith("._")
 
 
 def read_gpls(path: str | os.PathLike) -> Playlist:
@@ -74,10 +78,21 @@ def read_gpls(path: str | os.PathLike) -> Playlist:
     uris: list[str] = []
     for ln in lines[1:]:
         if ln.startswith("#P:"):
-            params = json.loads(ln[3:])
+            try:
+                loaded = json.loads(ln[3:])
+            except ValueError:
+                loaded = {}
+            params = loaded if isinstance(loaded, dict) else {}
         elif ln.startswith("#V"):
-            idx, data = ln[2:].split(":", 1)
-            video_params[int(idx)] = json.loads(data)
+            idx, sep, data = ln[2:].partition(":")
+            if not sep or not idx.isdigit():
+                continue  # not a video-parameter line
+            try:
+                params_for_video = json.loads(data)
+            except ValueError:
+                continue  # a damaged line loses its settings, not the video
+            if isinstance(params_for_video, dict):
+                video_params[int(idx)] = params_for_video
         elif not ln.startswith("#"):
             uris.append(ln)
 
@@ -89,13 +104,13 @@ def read_gpls(path: str | os.PathLike) -> Playlist:
             uri = str((base / uri).resolve())  # relative to the playlist (GridPlayer #109)
         entries.append(Entry(
             path=uri,
-            muted=vp.pop("is_muted", True),
-            paused=vp.pop("is_paused", False),
-            volume=vp.pop("volume", 1.0),
-            rate=vp.pop("rate", 1.0),
-            start_random=vp.pop("is_start_random", False),
-            position=vp.pop("current_position", 0) / 1000,
-            size_weight=float(vp.pop("gm_size_weight", 1.0)),
+            muted=bool(vp.pop("is_muted", True)),
+            paused=bool(vp.pop("is_paused", False)),
+            volume=_number(vp.pop("volume", 1.0), 1.0, 0.0, 1.5),
+            rate=_number(vp.pop("rate", 1.0), 1.0, 0.1, 8.0),
+            start_random=bool(vp.pop("is_start_random", False)),
+            position=_number(vp.pop("current_position", 0), 0.0, 0.0, 1e12) / 1000,
+            size_weight=_number(vp.pop("gm_size_weight", 1.0), 1.0, MIN_WEIGHT, MAX_WEIGHT),
             extra=vp,
         ))
     return Playlist(entries, params)
@@ -108,7 +123,28 @@ def write_gpls(path: str | os.PathLike, playlist: Playlist, save_positions=True,
         params = entry.to_gpls_params(save_positions, save_paused)
         lines.append(f"#V{idx}:" + json.dumps(params, separators=(",", ":")))
     lines += [e.path for e in playlist.entries]
-    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Write a temporary file and swap it in, so a crash or full disk can't leave
+    # a half-written playlist behind.
+    target = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(tmp, target)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def _number(value, default, lo, hi) -> float:
+    """A numeric playlist field, clamped; anything unusable becomes ``default``."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number:  # NaN
+        return default
+    return min(max(number, lo), hi)
 
 
 def read_m3u(path: str | os.PathLike) -> Playlist:

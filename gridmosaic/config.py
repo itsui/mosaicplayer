@@ -10,6 +10,17 @@ from .tile import AUTO, LOOP
 
 CONFIG_VERSION = 2
 
+# Allowed values for the settings that pick from a fixed set.
+CHOICES = {
+    "layout_mode": {"puzzle", "rows", "columns", "grid", "fixed-grid"},
+    "size_balance": {"equal", "balanced", "fill"},
+    "end_action": {"loop", "next", "random", "stop"},
+    "decoder_mode": {"auto", "gpu-copy", "gpu-zero-copy", "cpu"},
+    "hwdec_api": {"nvdec", "vaapi", "vulkan"},
+    "scaling": {"balanced", "quality", "fast"},
+    "titles": {"hover", "always", "never"},
+}
+
 
 @dataclass
 class Config:
@@ -58,16 +69,28 @@ class Config:
         for f in fields(cls):
             if not store.contains(f.name):
                 continue
-            raw = store.value(f.name)
             default = getattr(cfg, f.name)
-            setattr(cfg, f.name, _coerce(raw, default))
-        version = int(store.value("config_version", 1))
+            try:
+                value = _coerce(store.value(f.name), default)
+            except (TypeError, ValueError):
+                continue  # a damaged entry falls back to its default
+            if f.name in CHOICES and value not in CHOICES[f.name]:
+                continue
+            setattr(cfg, f.name, value)
+        try:
+            version = int(store.value("config_version", 1))
+        except (TypeError, ValueError):
+            version = 1
         if version < 2:
             # v2: equal-area puzzle. Move values still at the old defaults.
             if abs(cfg.max_crop - 0.12) < 1e-9:
                 cfg.max_crop = 0.15
             if abs(cfg.layout_effort - 1.2) < 1e-9:
                 cfg.layout_effort = 2.5
+        cfg.max_crop = min(max(cfg.max_crop, 0.0), 0.4)
+        cfg.gap = min(max(cfg.gap, 0), 40)
+        cfg.render_threads = min(max(cfg.render_threads, 1), 16)
+        cfg.layout_effort = min(max(cfg.layout_effort, 0.2), 10.0)
         return cfg
 
     def save(self) -> None:

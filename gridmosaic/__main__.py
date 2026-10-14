@@ -54,7 +54,7 @@ def main(argv=None):
     if args.decoder:
         cfg.decoder_mode = args.decoder
     if args.gap is not None:
-        cfg.gap = args.gap
+        cfg.gap = max(0, min(args.gap, 40))
     if args.crop is not None:
         cfg.max_crop = max(0.0, min(args.crop, 40.0)) / 100
     if args.no_crop:

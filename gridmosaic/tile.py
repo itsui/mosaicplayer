@@ -141,6 +141,7 @@ class Tile(QObject):
         self._paused = bool(entry.paused)
         self._hwdec_current = "no"
         self._resume_at = entry.position  # restore a saved playlist position once
+        self._at_end = False
 
         # GPU modes start on the GPU (if there's room) before the size is known;
         # auto/CPU start on the CPU and move up once the video turns out large.
@@ -206,12 +207,13 @@ class Tile(QObject):
         self._hwdec_current = value or "no"
 
     def _on_eof(self, _name, value):
+        self._at_end = bool(value)
         if value and self.end_action != LOOP:
             self.reached_end.emit()
 
     def _on_file_loaded(self, _event):
         if self._resume_at:
-            self.seek_to(self._resume_at)
+            self.seek_to(self._resume_at, exact=True)
             self._resume_at = 0.0
         elif self.entry.start_random:
             self.seek_random()
@@ -319,6 +321,8 @@ class Tile(QObject):
         return self._paused
 
     def set_paused(self, paused: bool):
+        if not paused and self._at_end:
+            self.seek_to(0)  # stopped at the end ("stop" mode): play again from the start
         self._paused = paused
         self.player.pause = paused
         self.entry.paused = paused
@@ -347,16 +351,17 @@ class Tile(QObject):
         self.player.loop_file = "inf" if action == LOOP else "no"
 
     def seek(self, seconds: float):
-        try:
-            self.player.seek(seconds, "relative")
-        except SystemError:
-            pass
+        self._seek(seconds, "relative", "keyframes")
 
-    def seek_to(self, seconds: float):
+    def seek_to(self, seconds: float, exact=False):
+        """Seek to a time. Keyframe seeks are fast; ``exact`` lands on the frame."""
+        self._seek(max(0.0, seconds), "absolute", "exact" if exact else "keyframes")
+
+    def _seek(self, amount, reference, precision):
         try:
-            self.player.seek(max(0.0, seconds), "absolute")
-        except SystemError:
-            pass
+            self.player.seek(amount, reference, precision)
+        except SystemError as e:  # e.g. nothing loaded yet; not worth a crash
+            log.warning("seek %s %s failed for %s: %s", amount, reference, self.title, e)
 
     def seek_random(self):
         duration = self.player.duration

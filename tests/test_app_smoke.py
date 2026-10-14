@@ -156,6 +156,33 @@ def test_focus_mode_and_merged_playlists(app, window, clips, tmp_path):
     assert window._playlist_path is None
 
 
+def test_removed_tile_is_gone_at_once(app, window, clips):
+    c = window.canvas
+    window.load([clips])
+    pump(app, 2.5)
+    victim = c.tiles[2]
+    rect = c._logical(c.rects[c._layout_tiles.index(victim)])
+    c.remove_tile(victim)
+    assert victim not in c._layout_tiles  # not drawn or clickable, even before relayout
+    assert c.tile_at(rect.center()) is not victim
+    assert len(c._layout_tiles) == len(c.rects) == 5
+
+
+def test_stop_at_end_then_play_restarts(app, window, clips):
+    c = window.canvas
+    window.load([next(clips.iterdir())])
+    pump(app, 2.0)
+    tile = c.tiles[0]
+    c.set_all_end_action("stop")
+    tile.seek_to(1.9, exact=True)
+    pump(app, 1.5)
+    assert tile._at_end and tile.paused
+    tile.set_paused(False)
+    pump(app, 0.6)
+    pos, _ = tile.progress()
+    assert not tile.paused and pos < 1.5
+
+
 def test_overlay_timer_idles(app, window, clips):
     c = window.canvas
     window.load([clips])

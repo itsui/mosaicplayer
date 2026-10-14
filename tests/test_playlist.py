@@ -72,3 +72,29 @@ def test_size_weight_round_trip(tmp_path):
     entries = read_gpls(out).entries
     assert entries[0].size_weight == 2.0 and entries[1].size_weight == 1.0
     assert out.read_text().count("gm_size_weight") == 1
+
+
+def test_damaged_playlist_lines_are_skipped(tmp_path):
+    p = tmp_path / "bad.gpls"
+    p.write_text("#GRIDPLAYER\n#P:{not json\n#V0:{broken\n#Vx:{}\n#V1:{\"gm_size_weight\": 0}\n"
+                 "#V2:{\"rate\": \"fast\", \"current_position\": null}\n/a.mp4\n/b.mp4\n/c.mp4\n")
+    pl = read_gpls(p)
+    assert [e.path for e in pl.entries] == ["/a.mp4", "/b.mp4", "/c.mp4"]
+    assert pl.params == {}
+    assert pl.entries[1].size_weight == 0.1  # clamped: zero would break the layout
+    assert pl.entries[2].rate == 1.0 and pl.entries[2].position == 0.0
+
+
+def test_write_is_atomic(tmp_path):
+    out = tmp_path / "x.gpls"
+    write_gpls(out, Playlist([Entry("/v/1.mp4")]))
+    write_gpls(out, Playlist([Entry("/v/2.mp4")]))
+    assert read_gpls(out).entries[0].path == "/v/2.mp4"
+    assert [f.name for f in tmp_path.iterdir()] == ["x.gpls"]  # no temp files left
+
+
+def test_macos_metadata_files_are_not_videos(tmp_path):
+    (tmp_path / "._clip.mp4").write_bytes(b"")
+    (tmp_path / "clip.mp4").write_bytes(b"")
+    entries, _ = expand_inputs([tmp_path])
+    assert [e.path.rsplit("/", 1)[1] for e in entries] == ["clip.mp4"]

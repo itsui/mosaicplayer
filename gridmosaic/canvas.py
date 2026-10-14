@@ -125,6 +125,7 @@ class Canvas(QOpenGLWidget):
             self.set_solo(None)
         self._destroy_tile(tile)
         self.tiles.remove(tile)
+        self._forget_from_layout({id(tile)})
         self.hovered = None
         self.schedule_relayout()
         self.tiles_changed.emit()
@@ -133,10 +134,18 @@ class Canvas(QOpenGLWidget):
         self.set_solo(None)
         for tile in self.tiles:
             self._destroy_tile(tile)
+        self._forget_from_layout({id(t) for t in self.tiles})
         self.tiles.clear()
         self.hovered = None
         self.schedule_relayout()
         self.tiles_changed.emit()
+
+    def _forget_from_layout(self, ids: set[int]):
+        """Drop closed tiles from what's drawn and clickable until the next layout."""
+        kept = [(t, r) for t, r in zip(self._layout_tiles, self.rects) if id(t) not in ids]
+        self._layout_tiles = [t for t, _ in kept]
+        self.rects = [r for _, r in kept]
+        self.update()
 
     def reload_all(self):
         """Recreate every player (needed after decoder or scaling changes)."""
@@ -651,7 +660,7 @@ class Canvas(QOpenGLWidget):
         pos, _ = source.progress()
         for t in self.tiles:
             if t is not source:
-                t.seek_to(pos)
+                t.seek_to(pos, exact=True)
 
     def set_all_speed(self, rate: float):
         for t in self.tiles:

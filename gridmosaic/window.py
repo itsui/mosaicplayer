@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import (QDialog, QFileDialog, QInputDialog, QLabel, QMainWindow,
-                               QMenu, QMessageBox)
+                               QMenu, QMessageBox, QVBoxLayout)
 
 from . import __version__
 from .canvas import Canvas
@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         self._empty.setAlignment(Qt.AlignCenter)
         self._empty.setStyleSheet("color: #888; font-size: 20px; background: transparent;")
         self._empty.setAttribute(Qt.WA_TransparentForMouseEvents)
+        QVBoxLayout(self.canvas).addWidget(self._empty)  # always fills the canvas
 
         self._build_menus()
         self._apply_window_config()
@@ -264,8 +265,13 @@ class MainWindow(QMainWindow):
         was_empty = not self.canvas.tiles
         playlists = []
         entries: list[Entry] = []
+        failed = []
         for item in inputs:
-            found, params = expand_inputs([item])
+            try:
+                found, params = expand_inputs([item])
+            except (OSError, ValueError, UnicodeError) as e:
+                failed.append(f"{Path(str(item)).name}: {e}")
+                continue
             is_playlist = Path(str(item)).suffix.lower() in (".gpls", ".m3u", ".m3u8")
             if is_playlist:
                 playlists.append(str(item))
@@ -276,8 +282,11 @@ class MainWindow(QMainWindow):
                     e.muted = self.cfg.start_muted
                     e.start_random = self.cfg.start_random
             entries += found
+        if failed:
+            self.toast("Could not open " + "; ".join(failed), 6000)
         if not entries:
-            self.toast("No videos found")
+            if not failed:
+                self.toast("No videos found")
             return
         entries = self._confirm_many(entries)
         if not entries:
@@ -549,10 +558,6 @@ class MainWindow(QMainWindow):
                 self._paused_by_minimize = False
                 self.canvas.resume_after_minimize()
         super().changeEvent(event)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._empty.resize(self.canvas.size())
 
     def closeEvent(self, event):
         self._store.setValue("geometry", self.saveGeometry())
