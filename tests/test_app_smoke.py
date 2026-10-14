@@ -11,6 +11,7 @@ import subprocess
 import time
 
 import pytest
+from PySide6.QtCore import Qt
 
 pytestmark = pytest.mark.skipif(
     not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) or not shutil.which("ffmpeg"),
@@ -197,6 +198,31 @@ def test_closed_tiles_are_freed(app, window, clips):
     gc.collect()
     assert not c.findChildren(Tile)
     assert sum(isinstance(o, Tile) for o in gc.get_objects()) <= 6  # not 18
+
+
+def test_wheel_acts_once_per_notch(app, window, clips):
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QWheelEvent
+    c = window.canvas
+    window.load([clips])
+    pump(app, 2.5)
+    tile = c._layout_tiles[0]
+    pos = c._logical(c.rects[0]).center()
+
+    def wheel(delta, mods=Qt.NoModifier):
+        app.sendEvent(c, QWheelEvent(pos, c.mapToGlobal(pos), QPoint(0, 0), QPoint(0, delta),
+                                     Qt.NoButton, mods, Qt.NoScrollPhase, False))
+
+    for _ in range(8):  # one notch from a touchpad / high-resolution wheel
+        wheel(15, Qt.AltModifier)
+    assert tile.entry.size_weight == 1.41  # one step, not eight
+    wheel(-120, Qt.AltModifier)
+    assert tile.entry.size_weight == 1.0
+
+
+def test_toasts_show_file_names_literally(app, window):
+    window.toast("<i>clip</i> & co")
+    assert window._toast.textFormat() == Qt.PlainText
 
 
 def test_overlay_timer_idles(app, window, clips):

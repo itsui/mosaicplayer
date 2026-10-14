@@ -29,3 +29,30 @@ def test_save_and_load_round_trip(isolated_settings):
     again = Config.load()
     assert (again.gap, again.layout_mode, again.recent_files, again.start_muted) == \
         (6, "rows", ["/a.gpls"], False)
+
+
+def test_ctrl_c_and_sigterm_close_cleanly(tmp_path):
+    import os
+    import shutil
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    import pytest
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) or not shutil.which("ffmpeg"):
+        pytest.skip("needs a display and ffmpeg")
+    clip = tmp_path / "c.mp4"
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "testsrc2=size=320x180:rate=25:duration=3", "-pix_fmt", "yuv420p", str(clip)],
+                   check=True)
+    env = dict(os.environ, GRIDMOSAIC_NO_VSYNC="1", XDG_CONFIG_HOME=str(tmp_path / "config"),
+               PYTHONPATH=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        proc = subprocess.Popen([sys.executable, "-m", "gridmosaic", str(clip), "--no-save-config"],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        time.sleep(4)
+        proc.send_signal(sig)
+        out, _ = proc.communicate(timeout=10)
+        assert proc.returncode == 0, (sig, out.decode()[-800:])
+        assert b"Destroyed while thread" not in out

@@ -4,9 +4,11 @@ import argparse
 import locale
 import logging
 import os
+import signal
+import socket
 import sys
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QSocketNotifier, QTimer
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
@@ -30,6 +32,32 @@ def limit_malloc_arenas(arenas=4):
         libc.mallopt(-8, arenas)  # M_ARENA_MAX
     except (OSError, AttributeError):
         pass  # not glibc
+
+
+def close_on_signals(app, win):
+    """Ctrl+C / SIGTERM close the window normally (saving settings, stopping players).
+
+    Qt's event loop runs in C++, so Python's signal handlers would only run once
+    some Python code does: Ctrl+C was ignored and SIGTERM killed the app without
+    cleanup. A socket pair wakes the Qt loop when a signal arrives.
+    """
+    reader, writer = socket.socketpair()
+    reader.setblocking(False)
+    writer.setblocking(False)
+    signal.set_wakeup_fd(writer.fileno())
+    notifier = QSocketNotifier(reader.fileno(), QSocketNotifier.Read, app)
+
+    def drain():
+        try:
+            reader.recv(64)
+        except OSError:
+            pass
+        win.close()
+
+    notifier.activated.connect(drain)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: None)  # handled via the wakeup fd above
+    app._signal_sockets = (reader, writer, notifier)  # keep alive
 
 
 def main(argv=None):
@@ -82,6 +110,9 @@ def main(argv=None):
         cfg.save = lambda: None  # command-line overrides stay temporary
 
     win = MainWindow(cfg)
+    close_on_signals(app, win)
+    # However the app quits, stop the players and render threads first.
+    app.aboutToQuit.connect(win.canvas.shutdown)
     if args.fullscreen or cfg.start_fullscreen:
         win.toggle_fullscreen()
     else:

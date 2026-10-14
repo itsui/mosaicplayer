@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self.canvas.message.connect(self.toast)
 
         self._toast = QLabel(self)
+        self._toast.setTextFormat(Qt.PlainText)  # file names may contain "<", "&", …
         self._toast.setStyleSheet(
             "background: rgba(0,0,0,200); color: white; padding: 10px 16px; border-radius: 6px;")
         self._toast.hide()

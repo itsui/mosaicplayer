@@ -12,7 +12,7 @@ import random
 import threading
 import time
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QOpenGLContext, QPainter, QPen
 from PySide6.QtOpenGL import QOpenGLTextureBlitter
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
@@ -62,6 +62,9 @@ class Canvas(QOpenGLWidget):
         self._layout_cache: dict = {}  # finished layouts by videos/window/settings
         self._shown_size = (0, 0)  # canvas size the current layout was made for
         self._refine_token = 0  # bumped per background search; older ones stop
+        self._wheel_key = None  # (tile, action) the wheel deltas below belong to
+        self._wheel_accum = 0
+        self._wheel_time = 0.0
         self._animation_start = 0.0
 
         self.setMouseTracking(True)
@@ -324,6 +327,13 @@ class Canvas(QOpenGLWidget):
         super().resizeEvent(event)
         self.schedule_relayout()
 
+    def event(self, event):
+        # Moving to a screen with another scale factor changes the size in device
+        # pixels without a resize event; lay out again for the new screen.
+        if event.type() == QEvent.DevicePixelRatioChange:
+            self.schedule_relayout()
+        return super().event(event)
+
     # --- painting -----------------------------------------------------------
 
     def initializeGL(self):
@@ -553,18 +563,31 @@ class Canvas(QOpenGLWidget):
         tile = self.tile_at(event.position())
         if tile is None:
             return
-        up = (event.angleDelta().y() or event.angleDelta().x()) > 0
-        if event.modifiers() & Qt.AltModifier:
-            self.resize_tile(tile, 1 if up else -1)
+        mods = event.modifiers()
+        action = ("size" if mods & Qt.AltModifier else "zoom" if mods & Qt.ControlModifier
+                  else "seek-long" if mods & Qt.ShiftModifier else "seek")
+        # Touchpads and high-resolution wheels send many small deltas per notch
+        # (often 15 of the usual 120); act once per full notch, not per event.
+        delta = event.angleDelta().y() or event.angleDelta().x()  # Alt may turn it sideways
+        now = time.monotonic()
+        key = (id(tile), action)
+        if self._wheel_key != key or now - self._wheel_time > 0.5:
+            self._wheel_key, self._wheel_accum = key, 0
+        self._wheel_time = now
+        self._wheel_accum += delta
+        notches = int(self._wheel_accum / 120)
+        if not notches:
             return
-        if event.modifiers() & Qt.ControlModifier:
+        self._wheel_accum -= notches * 120
+        if action == "size":
+            self.resize_tile(tile, notches)
+        elif action == "zoom":
             r = self._rect_of(tile)
             pos = event.position()
-            tile.zoom_at(0.25 if up else -0.25,
+            tile.zoom_at(0.25 * notches,
                          (pos.x() - r.left()) / r.width(), (pos.y() - r.top()) / r.height())
-            return
-        step = 30 if event.modifiers() & Qt.ShiftModifier else 5
-        tile.seek(step if up else -step)
+        else:
+            tile.seek((30 if action == "seek-long" else 5) * notches)
 
     # --- commands -----------------------------------------------------------
 
