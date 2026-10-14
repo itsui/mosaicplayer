@@ -39,6 +39,7 @@ class LayoutResult:
     coverage: float  # fraction of the screen covered by video
     size_spread: float  # largest / smallest tile area
     max_crop: float  # largest fraction of any video cut off
+    method: str = ""  # which engine produced it ("equal", "anneal", ...)
 
 
 # A tree is either a leaf index (int) or a tuple (op, left, right).
@@ -259,7 +260,9 @@ def puzzle_layout(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
         if score > best_score:
             best_tree, best_score = tree, score
 
-    return _finish(ev.place(best_tree), aspects, width, height, weights)
+    result = _finish(ev.place(best_tree), aspects, width, height, weights)
+    result.method = "anneal"
+    return result
 
 
 def _anneal(tree, ev, aspects, rng, budget, max_iters, abort=None, t_start=0.2, t_end=0.002):
@@ -572,7 +575,7 @@ class _EqualAreaSearch:
         if hit is not None:
             return hit
         self.calls += 1
-        if self.calls % 4096 == 0 and (time.perf_counter() > self.deadline
+        if self.calls % 512 == 0 and (time.perf_counter() > self.deadline
                                        or (self.abort is not None and self.abort())):
             raise TimeoutError
         k = sum(counts)
@@ -725,7 +728,9 @@ def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.
     rects: list[Rect | None] = [None] * n
     keep = 1.0 - max_crop
     _place_equal(tree, 0.0, 0.0, float(width), float(height), gap, pools, aspects, keep, rects)
-    return _finish(rects, aspects, width, height, weights)
+    result = _finish(rects, aspects, width, height, weights)
+    result.method = "equal"
+    return result
 
 
 _MEMOS: dict = {}  # search memos by (shapes, crop, slack, cost, big_group), most recent last
@@ -828,6 +833,11 @@ def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed
                 if on_progress and (not candidates or score(r) > max(map(score, candidates))):
                     on_progress(r)
                 candidates.append(r)
+    if not candidates and quick and balance != "fill":
+        # The quick layout runs on the UI thread and is replaced by the refined
+        # one a moment later: if the equal-area search didn't finish in time, an
+        # instant grid is a better placeholder than a slower fallback search.
+        return grid_layout(aspects, width, height, gap)
     if not candidates or balance == "fill":
         left = max(deadline - time.perf_counter(), 0.08)
         evenness = {"fill": 0.6, "balanced": 1.0}.get(balance, 1.5)

@@ -212,3 +212,20 @@ def test_puzzle_abort_returns_none_quickly():
 def test_extreme_weights_still_lay_out(weights):
     result = equal_area_layout([LANDSCAPE] * len(weights), 1920, 1080, weights=weights)
     _assert_valid(result, len(weights), 1920, 1080)
+
+
+def test_quick_layout_stays_quick_and_large_searches_resume():
+    aspects = _mixed(100, seed=21) + [1.0] * 10  # five shapes: a slow equal-area search
+    import gridmosaic.layout as layout_module
+    layout_module._MEMOS.clear()
+    start = time.perf_counter()
+    quick = puzzle(aspects, 2233, 1228, max_crop=0.15, time_budget=0.12, quick=True)
+    assert time.perf_counter() - start < 0.3  # runs on the UI thread
+    _assert_valid(quick, len(aspects), 2233, 1228)
+    # Background passes resume the memoised search until the equal-area layout exists.
+    for _ in range(4):
+        result = puzzle(aspects, 2233, 1228, max_crop=0.15, time_budget=2.5)
+        if result.method == "equal":
+            break
+    assert result.method == "equal"
+    assert result.size_spread < 2.0

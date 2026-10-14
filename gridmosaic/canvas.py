@@ -27,6 +27,7 @@ from .tile import NEXT, RANDOM, DecoderPolicy, Tile
 GL_COLOR_BUFFER_BIT = 0x4000
 
 QUICK_BUDGET_S = 0.12  # first puzzle layout, computed on the UI thread
+REFINE_PASSES = 4  # background passes allowed to finish a large equal-area search
 ANIMATION_S = 0.28  # tiles glide to new places when the layout changes
 LAYOUT_CACHE_SIZE = 32
 SIZE_STEPS = (0.35, 0.5, 0.71, 1.0, 1.41, 2.0, 2.83, 4.0)  # tile area multipliers (√2 apart)
@@ -278,8 +279,18 @@ class Canvas(QOpenGLWidget):
 
             def refine():
                 # Show the first good result at once; deeper passes may improve it.
-                emit(puzzle(aspects, w, h, time_budget=c.layout_effort, on_progress=emit,
-                            abort=lambda: self._refine_token != token, **args))
+                for attempt in range(REFINE_PASSES):
+                    result = puzzle(aspects, w, h, time_budget=c.layout_effort, on_progress=emit,
+                                    abort=lambda: self._refine_token != token, **args)
+                    if result is None:
+                        return  # superseded
+                    if (result.method == "equal" or c.size_balance == "fill"
+                            or attempt == REFINE_PASSES - 1):
+                        emit(result)
+                        return
+                    # The equal-area search ran out of time. Its memo keeps the work
+                    # done so far, so another pass finishes it instead of settling
+                    # for the uneven fallback layout.
 
             threading.Thread(target=refine, daemon=True).start()
             return
