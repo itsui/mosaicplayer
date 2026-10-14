@@ -14,7 +14,7 @@ from . import __version__
 from .canvas import Canvas
 from .config import Config
 from .layout import BALANCE_MODES, LAYOUT_MODES
-from .playlist import Entry, Playlist, expand_inputs, is_video, write_gpls
+from .playlist import PLAYLIST_EXTENSIONS, Entry, Playlist, expand_inputs, is_video, write_gpls
 from .settings_dialog import RELOAD_FIELDS, SettingsDialog
 from .tile import END_ACTIONS
 
@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
                                     checkable=True, checked=self.cfg.stay_on_top)
         self.menubar_action = self._act(m, "Show menu bar", self.set_menubar, ["Ctrl+M"],
                                         checkable=True, checked=self.cfg.show_menubar)
-        self.hud_action = self._act(m, "Stats overlay", self.set_hud, ["H"], checkable=True)
+        self._act(m, "Stats overlay", self.set_hud, ["H"], checkable=True)
         titles = m.addMenu("Titles")
         group = QActionGroup(self)
         for key, label in (("hover", "On hover"), ("always", "Always"), ("never", "Never")):
@@ -273,7 +273,7 @@ class MainWindow(QMainWindow):
             except (OSError, ValueError, UnicodeError) as e:
                 failed.append(f"{Path(str(item)).name}: {e}")
                 continue
-            is_playlist = Path(str(item)).suffix.lower() in (".gpls", ".m3u", ".m3u8")
+            is_playlist = Path(str(item)).suffix.lower() in PLAYLIST_EXTENSIONS
             if is_playlist:
                 playlists.append(str(item))
                 if params and was_empty:
@@ -397,7 +397,7 @@ class MainWindow(QMainWindow):
     def dropEvent(self, event):
         paths = [u.toLocalFile() or u.toString() for u in event.mimeData().urls()]
         paths = [p for p in paths if Path(p).is_dir() or is_video(p)
-                 or Path(p).suffix.lower() in {".gpls", ".m3u", ".m3u8"} or "://" in p]
+                 or Path(p).suffix.lower() in PLAYLIST_EXTENSIONS or "://" in p]
         if paths:
             self.load(paths)
 

@@ -29,7 +29,6 @@ class TileTarget:
         self.front: QOpenGLFramebufferObject | None = None  # read by the window
         self.back: QOpenGLFramebufferObject | None = None  # written by the worker
         self.size = (0, 0)  # requested by the window
-        self.has_frame = False
 
 
 class RenderWorker(QThread):

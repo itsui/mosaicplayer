@@ -261,10 +261,6 @@ class Tile(QObject):
             self.player.hwdec = self.policy.gpu_hwdec if use_gpu else "no"
 
     @property
-    def hwdec_active(self) -> str:
-        return self._hwdec_current
-
-    @property
     def on_gpu(self) -> bool:
         return self._hwdec_current not in ("no", "")
 
@@ -325,7 +321,6 @@ class Tile(QObject):
         self.frames_drawn += 1
         with self.target.lock:
             self.target.front, self.target.back = self.target.back, self.target.front
-            self.target.has_frame = True
         # The new back buffer still holds an older frame; re-render it next time
         # even if mpv has no new frame, so both buffers converge after a resize.
         self._dirty = self._dirty or self.target.back is None
@@ -336,7 +331,6 @@ class Tile(QObject):
             self._ctx = None
         with self.target.lock:
             self.target.front = self.target.back = None
-            self.target.has_frame = False
 
     # --- controls (UI thread) -----------------------------------------------
 
