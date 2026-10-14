@@ -730,6 +730,7 @@ def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.
 
 _MEMOS: dict = {}  # search memos by (shapes, crop, slack, cost, big_group), most recent last
 _MEMO_LIMIT = 6
+_MEMO_ENTRIES_LIMIT = 300_000  # ~100 MB; a memo past this is dropped and rebuilt
 
 
 def _memo_for(key) -> dict:
@@ -737,8 +738,8 @@ def _memo_for(key) -> dict:
     then reuses nearly all earlier work, and a search that ran out of time
     resumes where it stopped on the next call."""
     memo = _MEMOS.pop(key, None)
-    if memo is None:
-        memo = {}
+    if memo is None or len(memo) > _MEMO_ENTRIES_LIMIT:
+        memo = {}  # new setup, or one that grew over a long session
     _MEMOS[key] = memo
     while len(_MEMOS) > _MEMO_LIMIT:
         _MEMOS.pop(next(iter(_MEMOS)))
