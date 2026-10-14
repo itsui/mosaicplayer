@@ -61,6 +61,7 @@ class Canvas(QOpenGLWidget):
         self._previous_rects: dict[int, Rect] = {}  # tile id -> rect before the change
         self._layout_cache: dict = {}  # finished layouts by videos/window/settings
         self._shown_size = (0, 0)  # canvas size the current layout was made for
+        self._refine_token = 0  # bumped per background search; older ones stop
         self._animation_start = 0.0
 
         self.setMouseTracking(True)
@@ -70,13 +71,13 @@ class Canvas(QOpenGLWidget):
         self._relayout_timer.timeout.connect(self._relayout_now)
         self._layout_done.connect(self._apply_layout)
 
-        # Overlays (progress bars, HUD) need periodic repaint even when paused.
+        # Progress bars and the stats overlay need repainting even when videos are
+        # paused; the timer only runs while one of them is on screen.
         self._overlay_timer = QTimer(self, interval=250)
         self._overlay_timer.timeout.connect(self.update)
-        self._overlay_timer.start()
 
         self._cursor_timer = QTimer(self, singleShot=True)
-        self._cursor_timer.timeout.connect(lambda: self.setCursor(Qt.BlankCursor))
+        self._cursor_timer.timeout.connect(self._hide_cursor)
 
     def _make_policy(self) -> DecoderPolicy:
         c = self.cfg
@@ -203,6 +204,8 @@ class Canvas(QOpenGLWidget):
             return
         dpr = self.devicePixelRatioF()
         w, h = self.width() * dpr, self.height() * dpr
+        if w < 2 or h < 2:
+            return  # minimised or not shown yet; lay out when there's room
         key = self._layout_key(tiles, w, h)
         cached = self._layout_cache.get(key)
         if cached is not None:
@@ -237,14 +240,24 @@ class Canvas(QOpenGLWidget):
             # screen and glide to the refined one when it's done.
 
             def emit(result):
+                if result is None:
+                    return  # superseded by a newer search
                 try:
                     self._layout_done.emit(generation, (tiles, result, key))
                 except RuntimeError:
                     pass  # window closed while the layout was being refined
 
+            # Only one background search at a time: a newer one (say, while the
+            # window is being resized) makes the older stop. Focusing a single
+            # video doesn't start a search, so the full layout still finishes
+            # and is cached for when you come back.
+            self._refine_token += 1
+            token = self._refine_token
+
             def refine():
                 # Show the first good result at once; deeper passes may improve it.
-                emit(puzzle(aspects, w, h, time_budget=c.layout_effort, on_progress=emit, **args))
+                emit(puzzle(aspects, w, h, time_budget=c.layout_effort, on_progress=emit,
+                            abort=lambda: self._refine_token != token, **args))
 
             threading.Thread(target=refine, daemon=True).start()
             return
@@ -459,10 +472,30 @@ class Canvas(QOpenGLWidget):
         if tile is not self.hovered:
             self.hovered = tile
             self.update()
+        self._sync_overlay_timer()
 
     def leaveEvent(self, event):
         self.hovered = None
+        self._sync_overlay_timer()
         self.update()
+
+    def _hide_cursor(self):
+        self.setCursor(Qt.BlankCursor)
+        self._sync_overlay_timer()
+        self.update()
+
+    def set_hud(self, on: bool):
+        self.show_hud = on
+        self._sync_overlay_timer()
+        self.update()
+
+    def _sync_overlay_timer(self):
+        needed = self.show_hud or (self.hovered is not None
+                                   and self.cursor().shape() != Qt.BlankCursor)
+        if needed and not self._overlay_timer.isActive():
+            self._overlay_timer.start()
+        elif not needed:
+            self._overlay_timer.stop()
 
     def mousePressEvent(self, event):
         tile = self.tile_at(event.position())
@@ -574,10 +607,8 @@ class Canvas(QOpenGLWidget):
         if tile is self.solo:
             return
         self.solo = tile
-        for t in self.tiles:
-            if t is not tile:
-                # Hidden tiles stop decoding while one video is focused.
-                t.player.pause = True if tile else t.entry.paused
+        # Hidden tiles stop decoding while one video is focused.
+        self.resume_after_minimize()
         self._relayout_timer.stop()
         self._relayout_now()
 
@@ -591,12 +622,20 @@ class Canvas(QOpenGLWidget):
         tile.replace(random.choice(choices))
 
     def set_all_paused(self, paused: bool):
-        for t in self.tiles:
+        # While one video is focused, the hidden ones stay paused regardless.
+        for t in [self.solo] if self.solo else self.tiles:
             t.set_paused(paused)
         self.update()
 
     def all_paused(self) -> bool:
+        if self.solo:
+            return self.solo.paused
         return bool(self.tiles) and all(t.paused for t in self.tiles)
+
+    def resume_after_minimize(self):
+        """Restore each video's own paused state (hidden ones stay paused in focus mode)."""
+        for t in self.tiles:
+            t.player.pause = True if (self.solo and t is not self.solo) else t.entry.paused
 
     def set_all_muted(self, muted: bool):
         for t in self.tiles:

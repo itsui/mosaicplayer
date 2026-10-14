@@ -133,6 +133,52 @@ def test_full_session(app, window, clips, tmp_path):
     assert len(c.tiles) == 6
 
 
+def test_focus_mode_and_merged_playlists(app, window, clips, tmp_path):
+    from gridmosaic.playlist import Entry, Playlist, write_gpls
+    c = window.canvas
+    window.load([clips])
+    pump(app, 2.5)
+    # Pause/play all only touches the focused video; the hidden ones stay paused.
+    c.set_solo(c.tiles[0])
+    pump(app, 0.3)
+    c.set_all_paused(False)
+    pump(app, 0.3)
+    assert not c.tiles[0].paused
+    assert all(t.paused for t in c.tiles[1:])
+    c.set_solo(None)
+    pump(app, 0.3)
+    assert not any(t.paused for t in c.tiles)
+    # Adding a playlist to videos already open must not make it the save target.
+    extra = tmp_path / "extra.gpls"
+    write_gpls(extra, Playlist([Entry(str(next(clips.iterdir())))]))
+    window.load([str(extra)])
+    pump(app, 0.5)
+    assert window._playlist_path is None
+
+
+def test_overlay_timer_idles(app, window, clips):
+    c = window.canvas
+    window.load([clips])
+    pump(app, 2.0)
+    c.hovered = None
+    c._sync_overlay_timer()
+    assert not c._overlay_timer.isActive()
+    c.set_hud(True)
+    assert c._overlay_timer.isActive()
+    c.set_hud(False)
+    assert not c._overlay_timer.isActive()
+
+
+def test_many_videos_asks_first(app, window, clips, monkeypatch):
+    from gridmosaic.playlist import Entry
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: None)  # dialog "cancelled"
+    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: None)
+    entries = [Entry(str(p)) for p in sorted(clips.iterdir())] * 12  # 72 videos
+    assert window._confirm_many(entries) == []
+    assert window._confirm_many(entries[:10]) == entries[:10]
+
+
 def test_settings_dialog_round_trip(app, window):
     from gridmosaic.settings_dialog import SettingsDialog
     dialog = SettingsDialog(window.cfg, window)

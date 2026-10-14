@@ -175,3 +175,34 @@ def test_slots_are_assigned_by_playlist_position():
     scale = 1600 / 1920
     for a, b in zip(first, again.rects):
         assert abs(a.x * scale - b.x) < 2 and abs(a.y * scale - b.y) < 2
+
+
+@pytest.mark.parametrize("fn", [
+    lambda a, w, h: grid_layout(a, w, h, gap=40),
+    lambda a, w, h: fixed_grid(a, w, h, 4, 4, gap=40),
+    lambda a, w, h: justified_rows(a, w, h, gap=40),
+    lambda a, w, h: justified_columns(a, w, h, gap=40),
+    lambda a, w, h: puzzle(a, w, h, gap=40, time_budget=0.1),
+])
+@pytest.mark.parametrize("size", [(60, 40), (0, 0), (1, 300)])
+def test_tiny_canvas_never_crashes(fn, size):
+    result = fn(_mixed(12), *size)
+    assert len(result.rects) == 12
+    assert all(r.w > 0 and r.h > 0 for r in result.rects)
+
+
+def test_justified_rows_scale_to_many_videos():
+    aspects = _mixed(120, seed=9)
+    start = time.perf_counter()
+    result = justified_rows(aspects, 3840, 2160, gap=2)
+    assert time.perf_counter() - start < 1.0  # was O(n^4): 4 s for 100 videos
+    assert result.coverage > 0.9
+
+
+def test_puzzle_abort_returns_none_quickly():
+    aspects = _mixed(70, seed=4)
+    start = time.perf_counter()
+    result = puzzle(aspects, 3840, 2160, time_budget=10,
+                    abort=lambda: time.perf_counter() - start > 0.15)
+    assert result is None
+    assert time.perf_counter() - start < 1.5

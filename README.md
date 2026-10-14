@@ -130,6 +130,18 @@ is hidden).
 
 Stored in `~/.config/gridmosaic/gridmosaic.conf`.
 
+Adding more than 64 videos at once asks first (add all, or 64 at random):
+every video is its own player.
+
+## Troubleshooting
+
+- **Everything reacts about once a second while the screen is off or locked.**
+  The NVIDIA driver throttles vsynced OpenGL windows that aren't displayed, which
+  stalls the UI thread. It stops when the screen is back. For benchmarks with
+  the screen off, run with `GRIDMOSAIC_NO_VSYNC=1`.
+- **Black bars around some tiles in the puzzle.** Equal sizes can't always fit
+  every shape exactly. Allow cropping (`C`, 15%) or use *Fill first* (`B`).
+
 ## Layout of the code
 
 ```

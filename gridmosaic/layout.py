@@ -229,7 +229,7 @@ def _mutate(tree, aspects, rng) -> Tree:
 
 def puzzle_layout(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
                   crop_cost=0.5, seed=0, time_budget=1.2, restarts=4,
-                  max_iters=200_000, weights=None) -> LayoutResult:
+                  max_iters=200_000, weights=None, abort=None) -> LayoutResult:
     """Fill the screen with all videos, keeping their sizes similar.
 
     Runs ``restarts`` independent annealing searches sharing ``time_budget``
@@ -255,14 +255,14 @@ def puzzle_layout(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
         rng = random.Random(seed * 1000 + run)
         items = mixed[:] if run == 0 else rng.sample(range(n), n)
         tree = _initial_tree(items, aspects, target, rng)
-        tree, score = _anneal(tree, ev, aspects, rng, per_run, max_iters // restarts)
+        tree, score = _anneal(tree, ev, aspects, rng, per_run, max_iters // restarts, abort)
         if score > best_score:
             best_tree, best_score = tree, score
 
     return _finish(ev.place(best_tree), aspects, width, height, weights)
 
 
-def _anneal(tree, ev, aspects, rng, budget, max_iters, t_start=0.2, t_end=0.002):
+def _anneal(tree, ev, aspects, rng, budget, max_iters, abort=None, t_start=0.2, t_end=0.002):
     current = best = tree
     current_score = best_score = ev.score(tree)[0]
     start = time.perf_counter()
@@ -271,7 +271,7 @@ def _anneal(tree, ev, aspects, rng, budget, max_iters, t_start=0.2, t_end=0.002)
         if i % 32 == 0:
             # Cool from hot to cold over whichever budget runs out first.
             progress = max((time.perf_counter() - start) / budget, i / max_iters)
-            if progress >= 1.0:
+            if progress >= 1.0 or (abort is not None and abort()):
                 break
             temperature = t_start * (t_end / t_start) ** progress
         cand = _mutate(current, aspects, rng)
@@ -281,6 +281,16 @@ def _anneal(tree, ev, aspects, rng, budget, max_iters, t_start=0.2, t_end=0.002)
             if s > best_score:
                 best, best_score = cand, s
     return best, best_score
+
+
+def _degenerate(aspects, width, height) -> LayoutResult:
+    """Layout for a canvas too small to hold the videos: 1-pixel tiles."""
+    rects = [Rect(0.0, 0.0, 1.0, 1.0) for _ in aspects]
+    return LayoutResult(rects, 0.0, 1.0, 0.0)
+
+
+def _too_small(n, width, height, gap) -> bool:
+    return width - gap * (n - 1) < n or height - gap * (n - 1) < 1 or width < 2 or height < 2
 
 
 def grid_layout(aspects, width, height, gap=0.0) -> LayoutResult:
@@ -298,6 +308,8 @@ def grid_layout(aspects, width, height, gap=0.0) -> LayoutResult:
         covered = sum(min(cw, ch * a) * min(cw, ch * a) / a for a in aspects)
         if best is None or covered > best[0]:
             best = (covered, cols, rows, cw, ch)
+    if best is None:  # no column count fits (tiny window, big gap)
+        return grid_layout(aspects, width, height, 0.0) if gap else _degenerate(aspects, width, height)
     _, cols, rows, cw, ch = best
     rects = []
     for i, a in enumerate(aspects):
@@ -319,7 +331,7 @@ def _finish(rects, aspects, width, height, weights=None) -> LayoutResult:
     relative = [a / w for a, w in zip(areas, weights)] if weights else areas
     return LayoutResult(
         rects=rects,
-        coverage=sum(areas) / (width * height),
+        coverage=sum(areas) / (width * height) if width * height > 0 else 0.0,
         size_spread=max(relative) / min(relative),
         max_crop=max(_crop(r, a) for r, a in zip(rects, aspects)),
     )
@@ -336,9 +348,15 @@ def justified_rows(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
     n = len(aspects)
     if n == 0:
         return LayoutResult([], 0.0, 1.0, 0.0)
+    if _too_small(n, width, height, gap):
+        return grid_layout(aspects, width, height, gap)
     ev = _Evaluator(aspects, width, height, gap, max_crop, evenness, crop_cost)
+    # With k rows of equal height, k ≈ sqrt(H·Σaspect / W). Trying every k from
+    # 1 to n made this O(n⁴) (4 s for 100 videos); a window around it suffices.
+    k0 = math.sqrt(height * sum(aspects) / width)
+    candidates = range(max(1, math.floor(k0) - 3), min(n, math.ceil(k0) + 3) + 1)
     best = None
-    for k in range(1, n + 1):
+    for k in candidates:
         target = (height - gap * (k - 1)) / k
         if target <= 1:
             break
@@ -347,6 +365,8 @@ def justified_rows(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
         score = ev.score_rects(rects)
         if best is None or score > best[0]:
             best = (score, rects)
+    if best is None:
+        return grid_layout(aspects, width, height, gap)
     return _finish(best[1], aspects, width, height)
 
 
@@ -442,6 +462,9 @@ def fixed_grid(aspects, width, height, cols, rows, gap=0.0) -> LayoutResult:
         rows = math.ceil(n / cols)
     cw = (width - gap * (cols - 1)) / cols
     ch = (height - gap * (rows - 1)) / rows
+    if cw < 1 or ch < 1:
+        return fixed_grid(aspects, width, height, cols, rows, 0.0) if gap else \
+            _degenerate(aspects, width, height)
     rects = []
     for i, a in enumerate(aspects):
         r, c = divmod(i, cols)
@@ -520,8 +543,9 @@ def _shape_classes(aspects, weights=None):
 
 class _EqualAreaSearch:
     def __init__(self, reps, max_crop, slack, crop_cost, time_budget=math.inf,
-                 big_group=_BIG_GROUP, memo=None, weights=None):
+                 big_group=_BIG_GROUP, memo=None, weights=None, abort=None):
         self.reps = reps
+        self.abort = abort
         self.weights = weights or [1.0] * len(reps)
         self.big_group = big_group
         self.deadline = time.perf_counter() + time_budget
@@ -548,7 +572,8 @@ class _EqualAreaSearch:
         if hit is not None:
             return hit
         self.calls += 1
-        if self.calls % 4096 == 0 and time.perf_counter() > self.deadline:
+        if self.calls % 4096 == 0 and (time.perf_counter() > self.deadline
+                                       or (self.abort is not None and self.abort())):
             raise TimeoutError
         k = sum(counts)
         if k == 1:
@@ -664,13 +689,14 @@ def _sub_counts(counts, total, exhaustive=True, window=2):
 
 def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.0,
                       crop_cost=0.5, time_budget=math.inf, big_group=_BIG_GROUP,
-                      seed=0, weights=None) -> LayoutResult | None:
+                      seed=0, weights=None, abort=None) -> LayoutResult | None:
     """Puzzle where every video gets (nearly) the same area — or an area in
     proportion to its ``weights`` entry when sizes have been adjusted.
 
     ``balance`` 1.0 forces exactly equal areas; lower values let each split
     deviate from equal by up to (1 - balance) to cover more of the screen.
-    Returns None if the search runs past ``time_budget`` seconds.
+    Returns None if the search runs past ``time_budget`` seconds or ``abort()``
+    returns True.
     """
     n = len(aspects)
     if n == 0:
@@ -684,7 +710,7 @@ def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.
     memo = _memo_for((tuple(reps), tuple(class_weights), round(max_crop, 3), slack, crop_cost,
                       big_group))
     search = _EqualAreaSearch(reps, max_crop, slack, crop_cost, time_budget, big_group, memo,
-                              class_weights)
+                              class_weights, abort)
     try:
         tree = search.build(width / height, tuple(len(c) for c in classes))
     except TimeoutError:
@@ -758,7 +784,8 @@ _SPREAD_WEIGHT = {"equal": 0.3, "balanced": 0.12, "fill": 0.03}
 
 
 def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed=0,
-           time_budget=1.2, quick=False, weights=None, on_progress=None) -> LayoutResult:
+           time_budget=1.2, quick=False, weights=None, on_progress=None,
+           abort=None) -> LayoutResult | None:
     """Best puzzle layout for the chosen size balance within ``time_budget``.
 
     Equal and balanced modes use the equal-area search (exact sizes, or sizes
@@ -766,12 +793,16 @@ def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed
     out of time, uses the annealing search. The candidate with the best
     coverage/size-spread trade-off for the mode wins. ``on_progress`` is called
     with each new best candidate, so callers can show it before time runs out.
+    Returns None if ``abort()`` became true (the result is no longer wanted).
     """
     n = len(aspects)
-    if n <= 1:
+    if n <= 1 or _too_small(n, width, height, gap):
         return grid_layout(aspects, width, height, gap)
     deadline = time.perf_counter() + time_budget
     weight = _SPREAD_WEIGHT.get(balance, 0.3)
+
+    def aborted():
+        return abort is not None and abort()
 
     def score(r):
         return r.coverage - weight * math.log2(max(r.size_spread, 1.0))
@@ -788,7 +819,10 @@ def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed
             if left <= 0:
                 break
             r = equal_area_layout(aspects, width, height, gap, max_crop, 1.0 - slack,
-                                  time_budget=left, big_group=big, seed=seed, weights=weights)
+                                  time_budget=left, big_group=big, seed=seed, weights=weights,
+                                  abort=abort)
+            if aborted():
+                return None
             if r is not None:
                 if on_progress and (not candidates or score(r) > max(map(score, candidates))):
                     on_progress(r)
@@ -798,5 +832,8 @@ def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed
         evenness = {"fill": 0.6, "balanced": 1.0}.get(balance, 1.5)
         candidates.append(puzzle_layout(aspects, width, height, gap=gap, max_crop=max_crop,
                                         evenness=evenness, seed=seed, time_budget=left,
-                                        restarts=1 if quick else 4, weights=weights))
+                                        restarts=1 if quick else 4, weights=weights,
+                                        abort=abort))
+        if aborted():
+            return None
     return max(candidates, key=score)

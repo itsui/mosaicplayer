@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
@@ -36,6 +37,7 @@ HELP = """<h3>GridMosaic keys</h3><table cellspacing=4>
 </table>"""
 
 SPEEDS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0)
+MANY_VIDEOS = 64  # ask before going above this many players
 PLAYLIST_FILTER = "Playlists (*.gpls *.m3u *.m3u8)"
 VIDEO_FILTER = ("Videos and playlists (*.mp4 *.mkv *.webm *.mov *.avi *.m4v *.wmv *.flv *.ts "
                 "*.mpg *.mpeg *.gif *.gpls *.m3u *.m3u8);;All files (*)")
@@ -84,7 +86,8 @@ class MainWindow(QMainWindow):
         act = QAction(text, self)
         if shortcuts:
             act.setShortcuts([QKeySequence(s) for s in shortcuts])
-            act.setShortcutContext(Qt.ApplicationShortcut)
+            # Main window only: in dialogs, Space/M/Del must reach the dialog.
+            act.setShortcutContext(Qt.WindowShortcut)
         act.setCheckable(checkable)
         if checkable:
             act.setChecked(checked)
@@ -258,13 +261,15 @@ class MainWindow(QMainWindow):
     # --- open / save --------------------------------------------------------
 
     def load(self, inputs):
+        was_empty = not self.canvas.tiles
+        playlists = []
         entries: list[Entry] = []
         for item in inputs:
             found, params = expand_inputs([item])
             is_playlist = Path(str(item)).suffix.lower() in (".gpls", ".m3u", ".m3u8")
             if is_playlist:
-                self._remember_playlist(str(item))
-                if params:
+                playlists.append(str(item))
+                if params and was_empty:
                     self._playlist_params = params
             else:
                 for e in found:
@@ -274,10 +279,38 @@ class MainWindow(QMainWindow):
         if not entries:
             self.toast("No videos found")
             return
+        entries = self._confirm_many(entries)
+        if not entries:
+            return
+        for path in playlists:
+            # Ctrl+S saves back to a playlist only when it was opened on its own;
+            # after merging it into other videos it would overwrite it with more.
+            self._remember_playlist(path, save_target=was_empty and len(playlists) == 1
+                                    and len(inputs) == 1)
         self.canvas.add_entries(entries)
 
-    def _remember_playlist(self, path: str):
-        if Path(path).suffix.lower() == ".gpls":
+    def _confirm_many(self, entries: list[Entry]) -> list[Entry]:
+        """Ask before starting a very large number of players at once."""
+        total = len(entries) + len(self.canvas.tiles)
+        if total <= MANY_VIDEOS:
+            return entries
+        box = QMessageBox(self)
+        box.setWindowTitle("Add videos")
+        box.setText(f"This adds {len(entries)} videos ({total} in total). Every video is a "
+                    f"separate player; more than about {MANY_VIDEOS} can overload the computer.")
+        room = max(MANY_VIDEOS - len(self.canvas.tiles), 0)
+        add_all = box.addButton(f"Add all {len(entries)}", QMessageBox.AcceptRole)
+        add_some = box.addButton(f"Add {room} at random", QMessageBox.AcceptRole) if room else None
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        if box.clickedButton() is add_all:
+            return entries
+        if add_some is not None and box.clickedButton() is add_some:
+            return random.sample(entries, room)
+        return []
+
+    def _remember_playlist(self, path: str, save_target=True):
+        if save_target and Path(path).suffix.lower() == ".gpls":
             self._playlist_path = path
         self.cfg.add_recent(str(Path(path).resolve()))
         self.cfg.save()
@@ -460,8 +493,7 @@ class MainWindow(QMainWindow):
             self.toast("Menu bar hidden: right-click or Ctrl+M brings it back")
 
     def set_hud(self, on: bool):
-        self.canvas.show_hud = on
-        self.canvas.update()
+        self.canvas.set_hud(on)
 
     # --- misc ---------------------------------------------------------------
 
@@ -515,8 +547,7 @@ class MainWindow(QMainWindow):
                     t.player.pause = True  # keep each tile's own paused state
             elif not self.isMinimized() and self._paused_by_minimize:
                 self._paused_by_minimize = False
-                for t in self.canvas.tiles:
-                    t.player.pause = t.entry.paused
+                self.canvas.resume_after_minimize()
         super().changeEvent(event)
 
     def resizeEvent(self, event):

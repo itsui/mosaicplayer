@@ -241,10 +241,16 @@ class Tile(QObject):
     # --- rendering (render-worker thread, its GL context current) -----------
 
     def init_gl(self):
-        self._ctx = mpv.MpvRenderContext(
-            self.player, "opengl",
-            opengl_init_params={"get_proc_address": _PROC_ADDRESS_FN},
-        )
+        try:
+            self._ctx = mpv.MpvRenderContext(
+                self.player, "opengl",
+                opengl_init_params={"get_proc_address": _PROC_ADDRESS_FN},
+            )
+        except Exception:
+            log.exception("could not create the video output for %s", self.entry.path)
+            self.error = "could not start video output"
+            self.failed.emit()
+            return
         self._ctx.update_cb = self._on_render_update
         if self.player.path is None:
             self.player.play(self.entry.path)
@@ -395,8 +401,6 @@ class Tile(QObject):
         self.aspect_known = False
         self.created = time.monotonic()
         self.player.play(path)
-        if not self.paused:
-            self.player.pause = False
 
     def close(self):
         """Free the player. GL resources must already be released by the worker."""

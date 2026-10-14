@@ -3,6 +3,7 @@
 import argparse
 import locale
 import logging
+import os
 import sys
 
 from PySide6.QtCore import QTimer
@@ -33,7 +34,10 @@ def main(argv=None):
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.WARNING)
 
     fmt = QSurfaceFormat()
-    fmt.setSwapInterval(1)  # vsync: one composed frame per display refresh
+    # vsync: one composed frame per display refresh. GRIDMOSAIC_NO_VSYNC=1 turns it
+    # off for benchmarks: with the monitor off, NVIDIA throttles vsynced swaps to
+    # ~1 Hz, which stalls the UI thread and every Qt timer.
+    fmt.setSwapInterval(0 if os.environ.get("GRIDMOSAIC_NO_VSYNC") else 1)
     QSurfaceFormat.setDefaultFormat(fmt)
 
     app = QApplication(sys.argv[:1])
