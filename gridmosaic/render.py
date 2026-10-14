@@ -33,11 +33,10 @@ class TileTarget:
 
 
 class RenderWorker(QThread):
-    frames_ready = Signal()
-
-    def __init__(self, share: QOpenGLContext, index: int):
+    def __init__(self, share: QOpenGLContext, index: int, pool: "RenderPool"):
         super().__init__()
         self.setObjectName(f"render-{index}")
+        self.pool = pool
         self._ctx = QOpenGLContext()
         self._ctx.setFormat(share.format())
         self._ctx.setShareContext(share)
@@ -107,7 +106,7 @@ class RenderWorker(QThread):
                 f.glFinish()  # textures must be complete before the window samples them
                 for tile in rendered:
                     tile.swap_buffers()
-                self.frames_ready.emit()
+                self.pool.notify()
         self._run_calls()
         with self._tiles_lock:
             for tile in self.tiles:
@@ -140,10 +139,29 @@ class RenderPool(QObject):
 
     def __init__(self, share: QOpenGLContext, threads: int):
         super().__init__()
-        self.workers = [RenderWorker(share, i) for i in range(max(1, threads))]
+        self._notify_lock = threading.Lock()
+        self._notified = False
+        self.workers = [RenderWorker(share, i, self) for i in range(max(1, threads))]
         for w in self.workers:
-            w.frames_ready.connect(self.frames_ready)
             w.start()
+
+    def notify(self):
+        """Tell the window new frames are ready (any thread).
+
+        At most one notification is in flight: every queued signal is an event
+        the UI thread must handle before its timers, and one per rendered batch
+        (hundreds a second) starved Qt timers to about one tick per second.
+        """
+        with self._notify_lock:
+            if self._notified:
+                return
+            self._notified = True
+        self.frames_ready.emit()
+
+    def acknowledge(self):
+        """UI thread: the window is about to repaint with the latest frames."""
+        with self._notify_lock:
+            self._notified = False
 
     def add(self, tile):
         min(self.workers, key=lambda w: len(w.tiles)).add(tile)

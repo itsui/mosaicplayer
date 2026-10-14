@@ -71,14 +71,23 @@ none.
    - **Balanced**: splits may deviate ±15% when that fills more.
    - **Fill first**: simulated annealing that maximises coverage (97–100%)
      but lets sizes vary 2–3×.
+
+   Make the hovered video bigger or smaller with **+ / −** (or Alt+wheel, or
+   right-click → Size); the others re-pack around it. **0** resets it. Sizes
+   are saved in the playlist (`gm_size_weight`, ignored by GridPlayer).
+   Dragging a video onto a similarly shaped one swaps them, and the swap
+   sticks. For completely free arrangement, use justified rows or a grid.
 2. **Justified rows** — Google-Photos style, keeps playlist order.
 3. **Justified columns** — the same, rotated.
 4. **Auto grid** — equal cells; picks the column count that shows the most video.
 5. **Fixed grid** — your rows × columns, like GridPlayer.
 
-The layout waits (up to 2 s) until newly added videos report their size, shows
-a quick puzzle, then glides to a refined one (Settings → Layout → search
-time). The equal-area search keeps its work between calls, so resizing the
+The layout only changes when videos are added or removed, the window is
+resized, or a setting or video size changes. Finished layouts are cached, so
+focusing one video and coming back restores the exact same arrangement. New
+videos get a quick puzzle first, then glide to the refined one (Settings →
+Layout → search time); size and setting changes keep the current layout until
+the new one is ready. The equal-area search keeps its work between calls, so resizing the
 window or adding a video re-solves in well under a second. `R` reshuffles it, `C` toggles cropping.
 MaxRects-style bin packing doesn't fit this problem: tiles here are scalable,
 not fixed-size boxes.
@@ -91,7 +100,8 @@ not fixed-size boxes.
 | Middle-click | mute or unmute one |
 | Wheel, ← → | seek ±5 s (Shift+wheel ±30 s) |
 | Ctrl+wheel, Z | zoom into the hovered video towards the cursor, reset zoom |
-| Drag a tile onto another | swap them |
+| Drag a tile onto another | swap them (puzzle: similar shapes only) |
+| +, −, 0, Alt+wheel | bigger, smaller, normal size for the hovered video |
 | Space, M | pause all, mute all |
 | S, Y, Home | random positions, sync all to hovered, restart all |
 | N, Del | random video from the same folder, remove |

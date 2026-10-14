@@ -28,6 +28,8 @@ GL_COLOR_BUFFER_BIT = 0x4000
 
 QUICK_BUDGET_S = 0.12  # first puzzle layout, computed on the UI thread
 ANIMATION_S = 0.28  # tiles glide to new places when the layout changes
+LAYOUT_CACHE_SIZE = 32
+SIZE_STEPS = (0.35, 0.5, 0.71, 1.0, 1.41, 2.0, 2.83, 4.0)  # tile area multipliers (√2 apart)
 SIZE_WAIT_S = 2.0  # how long new videos may hold the layout while reporting their size
 DRAG_THRESHOLD_PX = 12
 
@@ -57,6 +59,8 @@ class Canvas(QOpenGLWidget):
         self._blitter: QOpenGLTextureBlitter | None = None
         self._unassigned: list[Tile] = []
         self._previous_rects: dict[int, Rect] = {}  # tile id -> rect before the change
+        self._layout_cache: dict = {}  # finished layouts by videos/window/settings
+        self._shown_size = (0, 0)  # canvas size the current layout was made for
         self._animation_start = 0.0
 
         self.setMouseTracking(True)
@@ -142,7 +146,7 @@ class Canvas(QOpenGLWidget):
         if self.pool is not None and len(self.pool.workers) != self.cfg.render_threads:
             self.pool.stop()
             self.pool = RenderPool(self.context(), self.cfg.render_threads)
-            self.pool.frames_ready.connect(self.update)
+            self.pool.frames_ready.connect(self._on_frames_ready)
         self.add_entries(entries)
 
     def entries(self) -> list[Entry]:
@@ -176,6 +180,13 @@ class Canvas(QOpenGLWidget):
     def _visible_tiles(self) -> list[Tile]:
         return [self.solo] if self.solo else list(self.tiles)
 
+    def _layout_key(self, tiles, w, h):
+        c = self.cfg
+        return (c.layout_mode if len(tiles) > 1 else "single",
+                tuple(id(t) for t in tiles), tuple(round(t.aspect, 3) for t in tiles),
+                tuple(t.entry.size_weight for t in tiles), round(w), round(h), c.gap,
+                round(c.max_crop, 3), c.size_balance, self._seed, c.fixed_cols, c.fixed_rows)
+
     def _relayout_now(self):
         tiles = self._visible_tiles()
         # Videos report their size a moment after opening. Wait for them (up to
@@ -188,11 +199,19 @@ class Canvas(QOpenGLWidget):
         self._layout_generation += 1
         generation = self._layout_generation
         if not tiles:
-            self._apply_layout(generation, (tiles, LayoutResult([], 0, 1, 0)))
+            self._apply_layout(generation, (tiles, LayoutResult([], 0, 1, 0), None))
             return
         dpr = self.devicePixelRatioF()
         w, h = self.width() * dpr, self.height() * dpr
+        key = self._layout_key(tiles, w, h)
+        cached = self._layout_cache.get(key)
+        if cached is not None:
+            # Same videos, window and settings as a layout we already made
+            # (e.g. coming back from focusing one video): reuse it exactly.
+            self._apply_layout(generation, (tiles, cached, key))
+            return
         aspects = [t.aspect for t in tiles]
+        weights = [t.entry.size_weight for t in tiles]
         c = self.cfg
         gap = c.gap * dpr
         mode = "grid" if len(tiles) == 1 else c.layout_mode
@@ -205,25 +224,40 @@ class Canvas(QOpenGLWidget):
         elif mode == "columns":
             result = justified_columns(aspects, w, h, gap=gap, max_crop=c.max_crop)
         else:
-            args = dict(gap=gap, max_crop=c.max_crop, balance=c.size_balance, seed=self._seed)
-            self._apply_layout(generation, (tiles, puzzle(
-                aspects, w, h, time_budget=QUICK_BUDGET_S, quick=True, **args)))
+            args = dict(gap=gap, max_crop=c.max_crop, balance=c.size_balance, seed=self._seed,
+                        weights=weights)
+            same_videos = (set(map(id, tiles)) == set(map(id, self._layout_tiles))
+                           and self._shown_size == (round(w), round(h)))
+            if not same_videos:
+                # New or removed videos, or a new window size: tiles need a place
+                # right away, so show a quick layout until the refined one is ready.
+                self._apply_layout(generation, (tiles, puzzle(
+                    aspects, w, h, time_budget=QUICK_BUDGET_S, quick=True, **args), None))
+            # Otherwise (a size or setting change) keep the current layout on
+            # screen and glide to the refined one when it's done.
 
-            def refine():
-                refined = puzzle(aspects, w, h, time_budget=c.layout_effort, **args)
+            def emit(result):
                 try:
-                    self._layout_done.emit(generation, (tiles, refined))
+                    self._layout_done.emit(generation, (tiles, result, key))
                 except RuntimeError:
                     pass  # window closed while the layout was being refined
 
+            def refine():
+                # Show the first good result at once; deeper passes may improve it.
+                emit(puzzle(aspects, w, h, time_budget=c.layout_effort, on_progress=emit, **args))
+
             threading.Thread(target=refine, daemon=True).start()
             return
-        self._apply_layout(generation, (tiles, result))
+        self._apply_layout(generation, (tiles, result, key))
 
     def _apply_layout(self, generation: int, payload):
-        tiles, result = payload
+        tiles, result, key = payload
+        if key is not None:
+            self._remember_layout(key, result)
         if generation != self._layout_generation:
             return  # a newer layout is on its way
+        dpr = self.devicePixelRatioF()
+        self._shown_size = (round(self.width() * dpr), round(self.height() * dpr))
         old = {id(t): self._shown_rect(t, r) for t, r in zip(self._layout_tiles, self.rects)}
         self._previous_rects = old
         self._animation_start = time.perf_counter()
@@ -231,6 +265,18 @@ class Canvas(QOpenGLWidget):
         self.rects = result.rects
         self.layout_info = result
         self.update()
+
+    def _on_frames_ready(self):
+        if self.pool is None:
+            return  # shutting down
+        self.pool.acknowledge()
+        self.update()
+
+    def _remember_layout(self, key, result: LayoutResult):
+        self._layout_cache.pop(key, None)
+        self._layout_cache[key] = result
+        while len(self._layout_cache) > LAYOUT_CACHE_SIZE:
+            self._layout_cache.pop(next(iter(self._layout_cache)))
 
     def _shown_rect(self, tile: Tile, final: Rect) -> Rect:
         """Where the tile is drawn right now (mid-animation if one is running)."""
@@ -252,7 +298,7 @@ class Canvas(QOpenGLWidget):
         self._blitter = QOpenGLTextureBlitter()
         self._blitter.create()
         self.pool = RenderPool(self.context(), self.cfg.render_threads)
-        self.pool.frames_ready.connect(self.update)
+        self.pool.frames_ready.connect(self._on_frames_ready)
         for tile in self._unassigned:
             self.pool.add(tile)
         self._unassigned.clear()
@@ -455,7 +501,10 @@ class Canvas(QOpenGLWidget):
         tile = self.tile_at(event.position())
         if tile is None:
             return
-        up = event.angleDelta().y() > 0
+        up = (event.angleDelta().y() or event.angleDelta().x()) > 0
+        if event.modifiers() & Qt.AltModifier:
+            self.resize_tile(tile, 1 if up else -1)
+            return
         if event.modifiers() & Qt.ControlModifier:
             r = self._rect_of(tile)
             pos = event.position()
@@ -473,8 +522,8 @@ class Canvas(QOpenGLWidget):
             # The puzzle picks positions itself, so a swap trades slots in the
             # current arrangement. That only looks right for similar shapes.
             if max(a.aspect, b.aspect) / min(a.aspect, b.aspect) > 1.3:
-                self.message.emit("In puzzle mode only similar-shaped videos can swap. "
-                                  "Use justified rows or a grid to arrange freely.")
+                self.message.emit("The puzzle can only swap videos of a similar shape. "
+                                  "For free arrangement use justified rows (2) or a grid (4, 5).")
                 return
             lt = self._layout_tiles
             if a in lt and b in lt:
@@ -486,6 +535,31 @@ class Canvas(QOpenGLWidget):
             return
         ia, ib = self.tiles.index(a), self.tiles.index(b)
         self.tiles[ia], self.tiles[ib] = b, a
+        self.schedule_relayout()
+
+    def resize_tile(self, tile: Tile, steps: int):
+        """Make a video bigger (steps > 0) or smaller in puzzle layouts."""
+        current = tile.entry.size_weight
+        index = min(range(len(SIZE_STEPS)), key=lambda i: abs(SIZE_STEPS[i] - current))
+        index = max(0, min(index + steps, len(SIZE_STEPS) - 1))
+        self._set_weight(tile, SIZE_STEPS[index])
+
+    def reset_tile_size(self, tile: Tile):
+        self._set_weight(tile, 1.0)
+
+    def reset_all_sizes(self):
+        for t in self.tiles:
+            t.entry.size_weight = 1.0
+        self.schedule_relayout()
+
+    def _set_weight(self, tile: Tile, weight: float):
+        if tile.entry.size_weight == weight:
+            return
+        tile.entry.size_weight = weight
+        if self.cfg.layout_mode != "puzzle":
+            self.message.emit("Video sizes apply in the puzzle layout (key 1)")
+            return
+        self.message.emit(f"{tile.title}: size ×{weight:g}")
         self.schedule_relayout()
 
     def shuffle_order(self):

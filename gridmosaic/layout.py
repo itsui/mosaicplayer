@@ -54,12 +54,13 @@ class _Evaluator:
     """Evaluates slicing trees for a fixed set of aspects and screen size."""
 
     def __init__(self, aspects, width, height, gap, max_crop, evenness, crop_cost,
-                 extreme_weight=0.25):
+                 extreme_weight=0.25, weights=None):
         self.aspects = aspects
         self.width = width
         self.height = height
         self.gap = gap
         self.leaf_ranges = [_leaf_range(a, max_crop) for a in aspects]
+        self.weights = weights or [1.0] * len(aspects)
         self.evenness = evenness
         self.crop_cost = crop_cost
         self.extreme_weight = extreme_weight
@@ -68,8 +69,9 @@ class _Evaluator:
     def _ranges(self, tree, out):
         if isinstance(tree, int):
             lo, hi = self.leaf_ranges[tree]
-            out[id(tree), tree] = (lo, hi, 1)
-            return lo, hi, 1
+            w = self.weights[tree]  # leaves share space by weight, not count
+            out[id(tree), tree] = (lo, hi, w)
+            return lo, hi, w
         op, left, right = tree
         lo1, hi1, k1 = self._ranges(left, out)
         lo2, hi2, k2 = self._ranges(right, out)
@@ -138,7 +140,7 @@ class _Evaluator:
     def score_rects(self, rects) -> float:
         areas = [r.area for r in rects]
         coverage = sum(areas) / (self.width * self.height)
-        logs = [math.log(a) for a in areas]
+        logs = [math.log(a / w) for a, w in zip(areas, self.weights)]
         mean = sum(logs) / len(logs)
         spread = math.sqrt(sum((v - mean) ** 2 for v in logs) / len(logs))
         extremes = max(logs) - min(logs)  # log of largest/smallest ratio
@@ -227,7 +229,7 @@ def _mutate(tree, aspects, rng) -> Tree:
 
 def puzzle_layout(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
                   crop_cost=0.5, seed=0, time_budget=1.2, restarts=4,
-                  max_iters=200_000) -> LayoutResult:
+                  max_iters=200_000, weights=None) -> LayoutResult:
     """Fill the screen with all videos, keeping their sizes similar.
 
     Runs ``restarts`` independent annealing searches sharing ``time_budget``
@@ -240,7 +242,7 @@ def puzzle_layout(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
     if n == 1:
         return _finish(grid_layout(aspects, width, height, gap).rects, aspects, width, height)
 
-    ev = _Evaluator(aspects, width, height, gap, max_crop, evenness, crop_cost)
+    ev = _Evaluator(aspects, width, height, gap, max_crop, evenness, crop_cost, weights=weights)
     target = width / height
 
     # One start interleaves portrait and landscape videos; the rest are random.
@@ -257,7 +259,7 @@ def puzzle_layout(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
         if score > best_score:
             best_tree, best_score = tree, score
 
-    return _finish(ev.place(best_tree), aspects, width, height)
+    return _finish(ev.place(best_tree), aspects, width, height, weights)
 
 
 def _anneal(tree, ev, aspects, rng, budget, max_iters, t_start=0.2, t_end=0.002):
@@ -311,12 +313,14 @@ def grid_layout(aspects, width, height, gap=0.0) -> LayoutResult:
     return _finish(rects, aspects, width, height)
 
 
-def _finish(rects, aspects, width, height) -> LayoutResult:
+def _finish(rects, aspects, width, height, weights=None) -> LayoutResult:
     areas = [r.area for r in rects]
+    # Size spread ignores deliberate size changes: compare area per unit weight.
+    relative = [a / w for a, w in zip(areas, weights)] if weights else areas
     return LayoutResult(
         rects=rects,
         coverage=sum(areas) / (width * height),
-        size_spread=max(areas) / min(areas),
+        size_spread=max(relative) / min(relative),
         max_crop=max(_crop(r, a) for r, a in zip(rects, aspects)),
     )
 
@@ -472,32 +476,53 @@ MAX_SHAPE_CLASSES = 4
 _BIG_GROUP = 8  # above this many videos, only near-even, fair-share splits are tried
 
 
-def _shape_classes(aspects):
-    order = sorted(range(len(aspects)), key=lambda i: aspects[i])
-    classes: list[list[int]] = []
-    for i in order:
+def _shape_classes(aspects, weights=None):
+    """Group videos by size weight, then by shape.
+
+    Returns (classes, reps, class_weights): index lists, each class's
+    representative aspect and its size weight.
+    """
+    weights = weights or [1.0] * len(aspects)
+
+    def rep(c):
+        return sum(math.log(aspects[i]) for i in c) / len(c)
+
+    groups: dict[float, list[list[int]]] = {}
+    for i in sorted(range(len(aspects)), key=lambda i: aspects[i]):
+        classes = groups.setdefault(weights[i], [])
         if classes and math.log(aspects[i]) - math.log(aspects[classes[-1][0]]) < _SHAPE_TOLERANCE:
             classes[-1].append(i)
         else:
             classes.append([i])
     # The search grows quickly with the number of classes: merge the two
-    # closest neighbours until at most MAX_SHAPE_CLASSES remain. Rare odd shapes
+    # closest neighbours (same weight only) until few remain. Rare odd shapes
     # then just get a little more cropping.
-    def rep(c):
-        return sum(math.log(aspects[i]) for i in c) / len(c)
-    while len(classes) > MAX_SHAPE_CLASSES:
-        gaps = [(rep(classes[j + 1]) - rep(classes[j])) * min(len(classes[j]), len(classes[j + 1]))
-                for j in range(len(classes) - 1)]
-        j = gaps.index(min(gaps))
-        classes[j:j + 2] = [classes[j] + classes[j + 1]]
-    reps = [math.exp(rep(c)) for c in classes]
-    return classes, reps
+    limit = MAX_SHAPE_CLASSES + len(groups) - 1
+    while sum(len(c) for c in groups.values()) > limit:
+        best = None
+        for w, classes in groups.items():
+            for j in range(len(classes) - 1):
+                gap = (rep(classes[j + 1]) - rep(classes[j])) * min(len(classes[j]), len(classes[j + 1]))
+                if best is None or gap < best[0]:
+                    best = (gap, w, j)
+        if best is None:
+            break
+        _, w, j = best
+        groups[w][j:j + 2] = [groups[w][j] + groups[w][j + 1]]
+    classes, reps, class_weights = [], [], []
+    for w in sorted(groups):
+        for c in groups[w]:
+            classes.append(c)
+            reps.append(math.exp(rep(c)))
+            class_weights.append(w)
+    return classes, reps, class_weights
 
 
 class _EqualAreaSearch:
     def __init__(self, reps, max_crop, slack, crop_cost, time_budget=math.inf,
-                 big_group=_BIG_GROUP, memo=None):
+                 big_group=_BIG_GROUP, memo=None, weights=None):
         self.reps = reps
+        self.weights = weights or [1.0] * len(reps)
         self.big_group = big_group
         self.deadline = time.perf_counter() + time_budget
         self.calls = 0
@@ -540,8 +565,9 @@ class _EqualAreaSearch:
             exhaustive = not big and (min(k1, k - k1) <= 3 or k <= 8)
             for c1 in _sub_counts(counts, k1, exhaustive=exhaustive, window=0 if big else 2):
                 c2 = tuple(a - b for a, b in zip(counts, c1))
+                fair = self._weight(c1) / self._weight(counts)
                 for f in self._fractions():
-                    share = k1 / k * f
+                    share = fair * f
                     if not 0.02 < share < 0.98:
                         continue
                     penalty = self._imbalance(f, k1, k - k1)
@@ -561,6 +587,9 @@ class _EqualAreaSearch:
                         return best
         self.memo[key] = best
         return best
+
+    def _weight(self, counts):
+        return sum(c * w for c, w in zip(counts, self.weights))
 
     def _fractions(self):
         if self.slack <= 0:
@@ -635,8 +664,9 @@ def _sub_counts(counts, total, exhaustive=True, window=2):
 
 def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.0,
                       crop_cost=0.5, time_budget=math.inf, big_group=_BIG_GROUP,
-                      seed=0) -> LayoutResult | None:
-    """Puzzle where every video gets (nearly) the same area.
+                      seed=0, weights=None) -> LayoutResult | None:
+    """Puzzle where every video gets (nearly) the same area — or an area in
+    proportion to its ``weights`` entry when sizes have been adjusted.
 
     ``balance`` 1.0 forces exactly equal areas; lower values let each split
     deviate from equal by up to (1 - balance) to cover more of the screen.
@@ -647,17 +677,21 @@ def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.
         return LayoutResult([], 0.0, 1.0, 0.0)
     if n == 1:
         return grid_layout(aspects, width, height, gap)
-    classes, reps = _shape_classes(aspects)
+    classes, reps, class_weights = _shape_classes(aspects, weights)
     # Round class shapes slightly so near-identical sets share a cached memo.
     reps = [math.exp(round(math.log(r), 2)) for r in reps]
     slack = max(0.0, min(1.0 - balance, 0.6))
-    memo = _memo_for((tuple(reps), round(max_crop, 3), slack, crop_cost, big_group))
-    search = _EqualAreaSearch(reps, max_crop, slack, crop_cost, time_budget, big_group, memo)
+    memo = _memo_for((tuple(reps), tuple(class_weights), round(max_crop, 3), slack, crop_cost,
+                      big_group))
+    search = _EqualAreaSearch(reps, max_crop, slack, crop_cost, time_budget, big_group, memo,
+                              class_weights)
     try:
         tree = search.build(width / height, tuple(len(c) for c in classes))
     except TimeoutError:
         return None
-    pools = [list(c) for c in classes]
+    # Within a shape class, videos fill slots in playlist order, so swapping two
+    # similar videos in the playlist swaps their places in the puzzle too.
+    pools = [sorted(c) for c in classes]
     if seed:  # reshuffle: same shapes, different videos in each slot
         rng = random.Random(seed)
         for pool in pools:
@@ -665,7 +699,7 @@ def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.
     rects: list[Rect | None] = [None] * n
     keep = 1.0 - max_crop
     _place_equal(tree, 0.0, 0.0, float(width), float(height), gap, pools, aspects, keep, rects)
-    return _finish(rects, aspects, width, height)
+    return _finish(rects, aspects, width, height, weights)
 
 
 _MEMOS: dict = {}  # search memos by (shapes, crop, slack, cost, big_group), most recent last
@@ -724,13 +758,14 @@ _SPREAD_WEIGHT = {"equal": 0.3, "balanced": 0.12, "fill": 0.03}
 
 
 def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed=0,
-           time_budget=1.2, quick=False) -> LayoutResult:
+           time_budget=1.2, quick=False, weights=None, on_progress=None) -> LayoutResult:
     """Best puzzle layout for the chosen size balance within ``time_budget``.
 
     Equal and balanced modes use the equal-area search (exact sizes, or sizes
     within ±15% per split for balanced); fill mode, and any search that runs
     out of time, uses the annealing search. The candidate with the best
-    coverage/size-spread trade-off for the mode wins.
+    coverage/size-spread trade-off for the mode wins. ``on_progress`` is called
+    with each new best candidate, so callers can show it before time runs out.
     """
     n = len(aspects)
     if n <= 1:
@@ -753,13 +788,15 @@ def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed
             if left <= 0:
                 break
             r = equal_area_layout(aspects, width, height, gap, max_crop, 1.0 - slack,
-                                  time_budget=left, big_group=big, seed=seed)
+                                  time_budget=left, big_group=big, seed=seed, weights=weights)
             if r is not None:
+                if on_progress and (not candidates or score(r) > max(map(score, candidates))):
+                    on_progress(r)
                 candidates.append(r)
     if not candidates or balance == "fill":
         left = max(deadline - time.perf_counter(), 0.08)
         evenness = {"fill": 0.6, "balanced": 1.0}.get(balance, 1.5)
         candidates.append(puzzle_layout(aspects, width, height, gap=gap, max_crop=max_crop,
                                         evenness=evenness, seed=seed, time_budget=left,
-                                        restarts=1 if quick else 4))
+                                        restarts=1 if quick else 4, weights=weights))
     return max(candidates, key=score)

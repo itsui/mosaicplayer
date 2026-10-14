@@ -27,6 +27,7 @@ HELP = """<h3>GridMosaic keys</h3><table cellspacing=4>
 <tr><td><b>1</b>–<b>5</b></td><td>puzzle, rows, columns, grid, fixed grid</td><td><b>R</b></td><td>reshuffle puzzle</td></tr>
 <tr><td><b>C</b></td><td>allow cropping on / off</td><td><b>[ ]</b></td><td>gap smaller / bigger</td></tr>
 <tr><td><b>B</b></td><td>puzzle tile sizes: equal / balanced / fill</td><td></td><td></td></tr>
+<tr><td><b>+ / −</b>, <b>Alt+wheel</b></td><td>make hovered video bigger / smaller</td><td><b>0</b></td><td>normal size</td></tr>
 <tr><td><b>N</b></td><td>random video from the same folder</td><td><b>S</b></td><td>random positions for all</td></tr>
 <tr><td><b>Y</b></td><td>sync all to hovered video's time</td><td><b>Home</b></td><td>restart all</td></tr>
 <tr><td><b>F</b>, <b>F11</b></td><td>fullscreen</td><td><b>H</b></td><td>stats overlay</td></tr>
@@ -143,6 +144,11 @@ class MainWindow(QMainWindow):
         self._act(m, "Replace hovered with random from its folder",
                   self._hovered(c.replace_with_random), ["N"])
         self._act(m, "Reset zoom of hovered video", self._hovered(lambda t: t.reset_zoom()), ["Z"])
+        self._act(m, "Make hovered video bigger", self._hovered(lambda t: c.resize_tile(t, 1)),
+                  ["+", "=", "Shift+="])
+        self._act(m, "Make hovered video smaller", self._hovered(lambda t: c.resize_tile(t, -1)),
+                  ["-"])
+        self._act(m, "Normal size for hovered video", self._hovered(c.reset_tile_size), ["0"])
         self._act(m, "Remove hovered video", self._hovered(c.remove_tile), ["Del"])
 
         m = self.layout_menu = bar.addMenu("&Layout")
@@ -164,6 +170,7 @@ class MainWindow(QMainWindow):
         self._act(None, "Cycle tile sizes", self.cycle_balance, ["B"])
         m.addSeparator()
         self._act(m, "Reshuffle puzzle", lambda: c.schedule_relayout(reshuffle=True), ["R"])
+        self._act(m, "Reset all video sizes", c.reset_all_sizes)
         self._act(m, "Shuffle playlist order", c.shuffle_order)
         self._act(m, "Sort by name", c.sort_by_name)
         self._act(m, "Fixed grid size…", self.ask_fixed_grid)
@@ -224,6 +231,10 @@ class MainWindow(QMainWindow):
             menu.addAction("Restart", lambda: tile.seek_to(0))
             menu.addAction("Jump to random position", tile.seek_random)
             menu.addAction("Reset zoom", tile.reset_zoom)
+            size = menu.addMenu(f"Size (×{tile.entry.size_weight:g})")
+            size.addAction("Bigger\t+", lambda: c.resize_tile(tile, 1))
+            size.addAction("Smaller\t−", lambda: c.resize_tile(tile, -1))
+            size.addAction("Normal\t0", lambda: c.reset_tile_size(tile))
             menu.addAction("Sync all to this video", lambda: c.sync_to(tile))
             menu.addAction("Replace with random from folder", lambda: c.replace_with_random(tile))
             speed = menu.addMenu("Speed")

@@ -37,6 +37,7 @@ class Entry:
     rate: float = 1.0
     start_random: bool = False
     position: float = 0.0  # seconds; GridPlayer stores milliseconds
+    size_weight: float = 1.0  # relative tile area in puzzle layouts (GridMosaic only)
     extra: dict = field(default_factory=dict)  # untouched GridPlayer fields
 
     def to_gpls_params(self, save_position=True, save_paused=True) -> dict:
@@ -47,6 +48,8 @@ class Entry:
             params["is_paused"] = self.paused
         if save_position and self.position > 0:
             params["current_position"] = int(self.position * 1000)
+        if self.size_weight != 1.0:
+            params["gm_size_weight"] = round(self.size_weight, 3)
         return params
 
 
@@ -92,6 +95,7 @@ def read_gpls(path: str | os.PathLike) -> Playlist:
             rate=vp.pop("rate", 1.0),
             start_random=vp.pop("is_start_random", False),
             position=vp.pop("current_position", 0) / 1000,
+            size_weight=float(vp.pop("gm_size_weight", 1.0)),
             extra=vp,
         ))
     return Playlist(entries, params)

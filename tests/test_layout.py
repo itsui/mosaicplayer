@@ -151,3 +151,27 @@ def test_equal_area_reshuffle_keeps_shapes():
     assert sorted((round(r.w), round(r.h)) for r in a.rects) == \
         sorted((round(r.w), round(r.h)) for r in b.rects)
     assert a.rects != b.rects
+
+
+def test_weights_scale_tile_areas():
+    aspects = [LANDSCAPE] * 17 + [PORTRAIT] * 12 + [OLD_TV] * 2 + [3 / 4]
+    weights = [1.0] * len(aspects)
+    weights[5] = 4.0
+    weights[20] = 0.5
+    result = equal_area_layout(aspects, 2233, 1228, gap=3, max_crop=0.15, weights=weights)
+    _assert_valid(result, len(aspects), 2233, 1228)
+    areas = sorted(r.area for r in result.rects)
+    median = areas[len(areas) // 2]
+    assert 3.3 < result.rects[5].area / median < 4.5
+    assert 0.4 < result.rects[20].area / median < 0.6
+
+
+def test_slots_are_assigned_by_playlist_position():
+    # Slots go to videos by playlist position within a shape class, so swapping
+    # two same-shaped videos in the playlist swaps their places on screen.
+    aspects = [LANDSCAPE, PORTRAIT, LANDSCAPE, LANDSCAPE, PORTRAIT, LANDSCAPE]
+    first = equal_area_layout(aspects, 1920, 1080).rects
+    again = equal_area_layout(list(aspects), 1600, 900)
+    scale = 1600 / 1920
+    for a, b in zip(first, again.rects):
+        assert abs(a.x * scale - b.x) < 2 and abs(a.y * scale - b.y) < 2
