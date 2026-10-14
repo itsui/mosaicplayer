@@ -61,18 +61,25 @@ none.
 
 ## Packing modes (keys 1–5)
 
-1. **Puzzle** — a slicing tree (nested side-by-side/stacked splits) searched by
-   simulated annealing: fills the screen, keeps tile sizes similar, reorders
-   videos. With up to 12% crop it reaches 97–100% coverage at a 1.3–3×
-   size spread; GridPlayer's best grid covers 63–79%.
+1. **Puzzle** — fills the screen with all videos, reordering them freely.
+   *Tile sizes* (Layout menu, Settings, or `B`):
+   - **Equal** (default): every video gets the same area. A memoised search
+     over slicing trees whose splits follow the video count on each side, so
+     equal areas are built in; it only chooses split directions and which
+     shapes go where. On the 32-video playlist: tiles within 1.26× of each
+     other at 94.5% coverage with 15% crop (1.46× / 88% with no crop).
+   - **Balanced**: splits may deviate ±15% when that fills more.
+   - **Fill first**: simulated annealing that maximises coverage (97–100%)
+     but lets sizes vary 2–3×.
 2. **Justified rows** — Google-Photos style, keeps playlist order.
 3. **Justified columns** — the same, rotated.
 4. **Auto grid** — equal cells; picks the column count that shows the most video.
 5. **Fixed grid** — your rows × columns, like GridPlayer.
 
 The layout waits (up to 2 s) until newly added videos report their size, shows
-a quick puzzle, then glides to a refined one ~1 s later (Settings → Layout →
-search time). `R` reshuffles it, `C` toggles cropping.
+a quick puzzle, then glides to a refined one (Settings → Layout → search
+time). The equal-area search keeps its work between calls, so resizing the
+window or adding a video re-solves in well under a second. `R` reshuffles it, `C` toggles cropping.
 MaxRects-style bin packing doesn't fit this problem: tiles here are scalable,
 not fixed-size boxes.
 
@@ -88,7 +95,7 @@ not fixed-size boxes.
 | Space, M | pause all, mute all |
 | S, Y, Home | random positions, sync all to hovered, restart all |
 | N, Del | random video from the same folder, remove |
-| 1–5, R, C, [ ] | layout mode, reshuffle, crop, gap |
+| 1–5, B, R, C, [ ] | layout mode, puzzle tile sizes, reshuffle, crop, gap |
 | F/F11, T, Ctrl+M, H | fullscreen, stay on top, menu bar, stats |
 | Ctrl+O, Ctrl+Shift+O, Ctrl+U, Ctrl+L | open videos, add folder, URL, playlist |
 | Ctrl+S, Ctrl+Shift+S, Ctrl+W | save playlist, save as, close all |
@@ -99,8 +106,8 @@ is hidden).
 
 ## Settings (Ctrl+,)
 
-- **Layout:** packing mode, gap, max crop, fixed grid size, puzzle evenness and
-  search time.
+- **Layout:** packing mode, gap, max crop, fixed grid size, puzzle tile sizes
+  and search time.
 - **Playback:** what happens at the end of a video (loop, next in folder,
   random from folder, stop), start muted, start at random position, pause
   when minimised.

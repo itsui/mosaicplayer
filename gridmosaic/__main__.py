@@ -20,6 +20,8 @@ def main(argv=None):
     parser.add_argument("--decoder", choices=list(DECODER_MODES), help="decoder mode")
     parser.add_argument("--gap", type=int, help="pixels between tiles")
     parser.add_argument("--no-crop", action="store_true", help="never crop videos to fill gaps")
+    parser.add_argument("--crop", type=float, metavar="PERCENT",
+                        help="crop videos up to this percent to fill gaps (default 15)")
     parser.add_argument("--fullscreen", action="store_true")
     parser.add_argument("--debug", action="store_true")
     # Test hooks
@@ -49,6 +51,8 @@ def main(argv=None):
         cfg.decoder_mode = args.decoder
     if args.gap is not None:
         cfg.gap = args.gap
+    if args.crop is not None:
+        cfg.max_crop = max(0.0, min(args.crop, 40.0)) / 100
     if args.no_crop:
         cfg.max_crop = 0.0
     if args.no_save_config:
