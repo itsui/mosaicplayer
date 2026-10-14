@@ -14,6 +14,12 @@ playlists.
 
 Needs libmpv (`libmpv2` on Debian/Ubuntu/Mint) and Python 3.11+.
 
+Command-line options (they override settings for that run only if combined
+with nothing else; settings changed in the app are saved):
+`--layout {puzzle,rows,columns,grid,fixed-grid}`, `--decoder
+{auto,gpu-copy,gpu-zero-copy,cpu}`, `--gap PX`, `--crop PERCENT`, `--no-crop`,
+`--fullscreen`, `--debug`. Ctrl+C in the terminal closes it cleanly.
+
 ![24 test clips, portrait and landscape, puzzle layout with the stats overlay](docs/screenshot.png)
 
 ## What's different from GridPlayer
@@ -85,9 +91,11 @@ none.
 The layout only changes when videos are added or removed, the window is
 resized, or a setting or video size changes. Finished layouts are cached, so
 focusing one video and coming back restores the exact same arrangement. New
-videos get a quick puzzle first, then glide to the refined one (Settings →
-Layout → search time); size and setting changes keep the current layout until
-the new one is ready. The equal-area search keeps its work between calls, so resizing the
+videos get a place at once (a quick puzzle, or an instant grid if the search
+needs longer), then glide to the refined layout (Settings → Layout → search
+time); size and setting changes keep the current layout until the new one is
+ready. Large equal-area searches that run past the search time continue in
+further background passes instead of settling for an uneven layout. The equal-area search keeps its work between calls, so resizing the
 window or adding a video re-solves in well under a second. `R` reshuffles it, `C` toggles cropping.
 MaxRects-style bin packing doesn't fit this problem: tiles here are scalable,
 not fixed-size boxes.
@@ -109,7 +117,8 @@ not fixed-size boxes.
 | F/F11, T, Ctrl+M, H | fullscreen, stay on top, menu bar, stats |
 | Ctrl+O, Ctrl+Shift+O, Ctrl+U, Ctrl+L | open videos, add folder, URL, playlist |
 | Ctrl+S, Ctrl+Shift+S, Ctrl+W | save playlist, save as, close all |
-| Ctrl+, , F1 | settings, help |
+| Ctrl+, , F1 / ? | settings, help |
+| Ctrl+Q | quit |
 
 Right-click anywhere for the full menu (also in fullscreen, where the menu bar
 is hidden).
@@ -154,8 +163,10 @@ gridmosaic/
   window.py           menus, shortcuts, drag and drop, open/save
   settings_dialog.py  the settings window
   config.py           persisted settings
-tests/                layout, playlist and end-to-end tests (pytest)
+  options.py          option names (importable without libmpv)
+tests/                layout, playlist, config and end-to-end tests (pytest)
 ```
 
 Run the tests with `~/.venvs/gridmosaic/bin/python -m pytest tests/`. The
-end-to-end test opens a small window with generated clips.
+end-to-end tests open a small window with generated clips (they need a display
+and ffmpeg) and keep their settings in a temporary folder.
