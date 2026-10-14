@@ -207,7 +207,7 @@ class MainWindow(QMainWindow):
         self._act(m, "Settings…", self.open_settings, ["Ctrl+,"])
 
         m = self.help_menu = bar.addMenu("&Help")
-        self._act(m, "Keyboard and mouse", self.show_help, ["F1", "?"])
+        self._act(m, "Keyboard and mouse", self.show_help, ["F1", "?", "Shift+?"])
         self._act(m, "About GridMosaic", self.show_about)
 
     def _fill_recent(self):
@@ -432,9 +432,16 @@ class MainWindow(QMainWindow):
         self.menubar_action.setChecked(self.cfg.show_menubar)
         on_top = bool(self.windowFlags() & Qt.WindowStaysOnTopHint)
         if on_top != self.cfg.stay_on_top:
+            visible = self.isVisible()
             self.setWindowFlag(Qt.WindowStaysOnTopHint, self.cfg.stay_on_top)
-            if self.isVisible():
+            if visible:
+                # Changing a window flag recreates the native window, which comes
+                # back hidden and inactive: show it, and take back keyboard focus
+                # so shortcuts keep working without a click.
                 self.show()
+                self.raise_()
+                self.activateWindow()
+                self.canvas.setFocus()
         self.top_action.setChecked(self.cfg.stay_on_top)
 
     def set_layout_mode(self, mode: str):

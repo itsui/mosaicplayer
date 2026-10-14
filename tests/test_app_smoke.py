@@ -220,6 +220,50 @@ def test_wheel_acts_once_per_notch(app, window, clips):
     assert tile.entry.size_weight == 1.0
 
 
+def test_keyboard_shortcuts(app, window, clips):
+    import time
+    from PySide6.QtTest import QTest
+    c = window.canvas
+    cfg = window.cfg
+    window.activateWindow()
+    window.load([clips])
+    pump(app, 2.5)
+    c.setFocus()
+
+    def key(k, mod=Qt.NoModifier):
+        QTest.keyClick(c, k, mod)
+        pump(app, 0.2)
+
+    key(Qt.Key_Space)
+    assert c.all_paused()
+    key(Qt.Key_Space)
+    for i, mode in enumerate(["puzzle", "rows", "columns", "grid", "fixed-grid"], 1):
+        key(getattr(Qt, f"Key_{i}"))
+        assert cfg.layout_mode == mode
+    key(Qt.Key_1)
+    c.hovered = tile = c._layout_tiles[0]
+    key(Qt.Key_Plus)
+    assert tile.entry.size_weight == 1.41
+    key(Qt.Key_0)
+    assert tile.entry.size_weight == 1.0
+    gap = cfg.gap
+    key(Qt.Key_BracketRight)
+    assert cfg.gap == gap + 2
+    key(Qt.Key_M, Qt.ControlModifier)
+    assert not window.menuBar().isVisible()
+    key(Qt.Key_M, Qt.ControlModifier)
+    assert window.menuBar().isVisible()
+    # Stay on top recreates the native window; it must get keyboard focus back.
+    key(Qt.Key_T)
+    deadline = time.monotonic() + 5
+    while app.activeWindow() is not window and time.monotonic() < deadline:
+        pump(app, 0.05)
+    assert cfg.stay_on_top
+    key(Qt.Key_Space)
+    assert c.all_paused()
+    key(Qt.Key_T)
+
+
 def test_toasts_show_file_names_literally(app, window):
     window.toast("<i>clip</i> & co")
     assert window._toast.textFormat() == Qt.PlainText
