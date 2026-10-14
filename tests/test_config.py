@@ -56,3 +56,19 @@ def test_ctrl_c_and_sigterm_close_cleanly(tmp_path):
         out, _ = proc.communicate(timeout=10)
         assert proc.returncode == 0, (sig, out.decode()[-800:])
         assert b"Destroyed while thread" not in out
+
+
+def test_command_line_overrides_are_not_saved(isolated_settings):
+    from gridmosaic.__main__ import apply_overrides
+    QSettings("gridmosaic", "gridmosaic").clear()
+    Config(layout_mode="puzzle", gap=2).save()
+    cfg = Config.load()
+    apply_overrides(cfg, {"layout_mode": "rows", "gap": 10})
+    assert cfg.layout_mode == "rows" and cfg.gap == 10  # in effect for this run
+    cfg.save()
+    again = Config.load()
+    assert again.layout_mode == "puzzle" and again.gap == 2  # not saved
+    cfg.gap = 6  # changed in the app afterwards: that is saved
+    cfg.save()
+    assert Config.load().gap == 6
+    assert Config.load().layout_mode == "puzzle"

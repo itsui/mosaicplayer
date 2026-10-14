@@ -60,6 +60,33 @@ def close_on_signals(app, win):
     app._signal_sockets = (reader, writer, notifier)  # keep alive
 
 
+def apply_overrides(cfg, overrides: dict):
+    """Apply command-line overrides for this run only.
+
+    Settings are saved whenever they change in the app (and on exit), which
+    made a one-off flag like --layout rows the new permanent default. Saving
+    now writes the original value back for any override still in effect;
+    a setting changed in the app afterwards is saved as usual.
+    """
+    saved = {name: getattr(cfg, name) for name in overrides}
+    for name, value in overrides.items():
+        setattr(cfg, name, value)
+    save = cfg.save
+
+    def save_without_overrides():
+        current = {name: getattr(cfg, name) for name in overrides}
+        for name, value in overrides.items():
+            if current[name] == value:
+                setattr(cfg, name, saved[name])
+        try:
+            save()
+        finally:
+            for name, value in current.items():
+                setattr(cfg, name, value)
+
+    cfg.save = save_without_overrides
+
+
 def main(argv=None):
     limit_malloc_arenas()
     parser = argparse.ArgumentParser(prog="gridmosaic", description=__doc__)
@@ -105,18 +132,20 @@ def main(argv=None):
         return 1
 
     cfg = Config.load()
+    overrides = {}
     if args.layout:
-        cfg.layout_mode = args.layout
+        overrides["layout_mode"] = args.layout
     if args.decoder:
-        cfg.decoder_mode = args.decoder
+        overrides["decoder_mode"] = args.decoder
     if args.gap is not None:
-        cfg.gap = max(0, min(args.gap, 40))
+        overrides["gap"] = max(0, min(args.gap, 40))
     if args.crop is not None:
-        cfg.max_crop = max(0.0, min(args.crop, 40.0)) / 100
+        overrides["max_crop"] = max(0.0, min(args.crop, 40.0)) / 100
     if args.no_crop:
-        cfg.max_crop = 0.0
+        overrides["max_crop"] = 0.0
+    apply_overrides(cfg, overrides)
     if args.no_save_config:
-        cfg.save = lambda: None  # command-line overrides stay temporary
+        cfg.save = lambda: None
 
     win = MainWindow(cfg)
     close_on_signals(app, win)

@@ -14,8 +14,8 @@ playlists.
 
 Needs libmpv (`libmpv2` on Debian/Ubuntu/Mint) and Python 3.11+.
 
-Command-line options (they override settings for that run only if combined
-with nothing else; settings changed in the app are saved):
+Command-line options apply to that run only (your saved settings stay as they
+were, unless you change the same setting in the app):
 `--layout {puzzle,rows,columns,grid,fixed-grid}`, `--decoder
 {auto,gpu-copy,gpu-zero-copy,cpu}`, `--gap PX`, `--crop PERCENT`, `--no-crop`,
 `--fullscreen`, `--debug`. Ctrl+C in the terminal closes it cleanly.
