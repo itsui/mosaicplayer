@@ -13,7 +13,7 @@ import threading
 import time
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QOpenGLContext, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QImage, QOpenGLContext, QPainter, QPen
 from PySide6.QtOpenGL import QOpenGLTextureBlitter
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
@@ -63,6 +63,8 @@ class Canvas(QOpenGLWidget):
         self._layout_cache: dict = {}  # finished layouts by videos/window/settings
         self._shown_size = (0, 0)  # canvas size the current layout was made for
         self._refine_token = 0  # bumped per background search; older ones stop
+        self._overlay_image: QImage | None = None  # cached static overlays
+        self._overlay_key = None
         self._wheel_key = None  # (tile, action) the wheel deltas below belong to
         self._wheel_accum = 0
         self._wheel_time = 0.0
@@ -410,11 +412,56 @@ class Canvas(QOpenGLWidget):
         return QRectF(rect.x / dpr, rect.y / dpr, rect.w / dpr, rect.h / dpr)
 
     def _paint_overlays(self, p: QPainter):
-        p.setRenderHint(QPainter.Antialiasing)
-        small = QFont(self.font())
-        small.setPointSizeF(9.5)
-        p.setFont(small)
         cursor_visible = self.cursor().shape() != Qt.BlankCursor
+        hovered = self.hovered if cursor_visible else None
+        animating = time.perf_counter() - self._animation_start < ANIMATION_S
+        if animating:
+            # Tiles are moving: draw everything live so overlays stay on them.
+            self._paint_static_overlays(p, None)
+        else:
+            # Titles, pause/mute icons and error tiles rarely change; drawing them
+            # for 100 tiles every frame took ~18 ms. Cache them in one image.
+            dpr = self.devicePixelRatioF()
+            key = (self.width(), self.height(), dpr, self.cfg.titles, id(hovered),
+                   tuple((id(t), r, t.paused, t.entry.muted, t.error, t.title)
+                         for t, r in zip(self._layout_tiles, self.rects)))
+            if key != self._overlay_key:
+                image = QImage(int(self.width() * dpr), int(self.height() * dpr),
+                               QImage.Format_ARGB32_Premultiplied)
+                image.setDevicePixelRatio(dpr)
+                image.fill(Qt.transparent)
+                cache_painter = QPainter(image)
+                self._paint_static_overlays(cache_painter, hovered)
+                cache_painter.end()
+                self._overlay_image, self._overlay_key = image, key
+            p.drawImage(0, 0, self._overlay_image)
+        p.setFont(self._overlay_font())
+        p.setRenderHint(QPainter.Antialiasing)
+        if hovered is not None and hovered in self._layout_tiles:
+            r = self._rect_of(hovered)
+            if not hovered.error:
+                self._paint_info_bar(p, hovered, r, full=True)
+                p.setPen(QPen(QColor(255, 255, 255, 110), 1.5))
+                p.setBrush(Qt.NoBrush)
+                p.drawRect(r.adjusted(0.75, 0.75, -0.75, -0.75))
+        if self._dragging and self._press and self.hovered and self.hovered is not self._press[1]:
+            target = self._rect_of(self.hovered)
+            if target:
+                p.setPen(QPen(QColor(120, 200, 255), 3))
+                p.setBrush(QColor(120, 200, 255, 40))
+                p.drawRect(target)
+        if self.show_hud:
+            self._paint_hud(p)
+
+    def _overlay_font(self) -> QFont:
+        font = QFont(self.font())
+        font.setPointSizeF(9.5)
+        return font
+
+    def _paint_static_overlays(self, p: QPainter, skip: Tile | None):
+        """Per-tile overlays that only change with state (not with time)."""
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setFont(self._overlay_font())
         for tile, rect in zip(self._layout_tiles, self.rects):
             r = self._logical(self._shown_rect(tile, rect))
             if tile.error:
@@ -432,21 +479,8 @@ class Canvas(QOpenGLWidget):
             if not tile.entry.muted:
                 p.setPen(QColor(120, 220, 255))
                 p.drawText(QPointF(r.left() + 8, r.top() + 20), "🔊")
-            hover = tile is self.hovered and cursor_visible
-            if hover or self.cfg.titles == "always":
-                self._paint_info_bar(p, tile, r, full=hover)
-            if hover:
-                p.setPen(QPen(QColor(255, 255, 255, 110), 1.5))
-                p.setBrush(Qt.NoBrush)
-                p.drawRect(r.adjusted(0.75, 0.75, -0.75, -0.75))
-        if self._dragging and self._press and self.hovered and self.hovered is not self._press[1]:
-            target = self._rect_of(self.hovered)
-            if target:
-                p.setPen(QPen(QColor(120, 200, 255), 3))
-                p.setBrush(QColor(120, 200, 255, 40))
-                p.drawRect(target)
-        if self.show_hud:
-            self._paint_hud(p)
+            if self.cfg.titles == "always" and tile is not skip:
+                self._paint_info_bar(p, tile, r, full=False)
 
     def _paint_info_bar(self, p: QPainter, tile: Tile, r: QRectF, full: bool):
         if self.cfg.titles == "never" and not full:
