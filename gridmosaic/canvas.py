@@ -175,6 +175,8 @@ class Canvas(QOpenGLWidget):
             t.snapshot_position()
 
     def _on_aspect(self, tile: Tile):
+        if tile not in self.tiles:
+            return  # closed while the notification was queued
         tile.apply_decoder_policy()
         self.schedule_relayout()
 

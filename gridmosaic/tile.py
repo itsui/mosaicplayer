@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 import time
 from pathlib import Path
@@ -46,6 +47,21 @@ SCALING = {
     "fast": dict(scale="bilinear", dscale="bilinear", cscale="bilinear",
                  correct_downscaling=False, linear_downscaling=False, sigmoid_upscaling=False),
 }
+
+
+def _while_open(method):
+    """Skip player calls on a closed tile.
+
+    mpv reports from its own threads, so a queued notification (say, the video
+    size) can reach the UI after its tile was closed; acting on it would touch a
+    shut-down player.
+    """
+    def wrapper(self, *args, **kwargs):
+        if self.closed:
+            return None
+        return method(self, *args, **kwargs)
+    wrapper.__name__, wrapper.__doc__ = method.__name__, method.__doc__
+    return wrapper
 
 
 def _mpv_log(level, prefix, text):
@@ -120,6 +136,7 @@ class Tile(QObject):
     aspect_changed = Signal()
     failed = Signal()
     reached_end = Signal()
+    _loaded = Signal()  # mpv thread -> UI thread
 
     def __init__(self, entry: Entry, policy: DecoderPolicy, end_action=LOOP,
                  scaling="balanced", parent=None):
@@ -142,6 +159,8 @@ class Tile(QObject):
         self._hwdec_current = "no"
         self._resume_at = entry.position  # restore a saved playlist position once
         self._at_end = False
+        self.closed = False
+        self._video_pixels = 0
 
         # GPU modes start on the GPU (if there's room) before the size is known;
         # auto/CPU start on the CPU and move up once the video turns out large.
@@ -183,11 +202,16 @@ class Tile(QObject):
         self.player.observe_property("hwdec-current", self._on_hwdec)
         self.player.observe_property("eof-reached", self._on_eof)
         self.player.event_callback("end-file")(self._on_end_file)
-        self.player.event_callback("file-loaded")(self._on_file_loaded)
+        self.player.event_callback("file-loaded")(lambda _event: self._loaded.emit())
+        self._loaded.connect(self._after_load)  # queued: runs on the UI thread
         # Playback starts in init_gl(): libmpv's video output fails to open
         # unless the render context already exists.
 
-    # --- mpv callbacks (run on mpv threads; only emit signals here) ---------
+    # --- mpv callbacks -----------------------------------------------------
+    #
+    # These run on mpv's event thread. They only record values and emit
+    # signals: calling into the player from here races with the UI thread
+    # closing it, and a seek during terminate() crashed libmpv (use after free).
 
     def _on_video_params(self, _name, params):
         if not params or not params.get("aspect"):
@@ -196,8 +220,7 @@ class Tile(QObject):
         if not self.aspect_known or abs(aspect - self.aspect) > 1e-3:
             self.aspect = aspect
             self.aspect_known = True
-            fps = self.player.container_fps or 30.0
-            self.load_mpx = params.get("w", 0) * params.get("h", 0) * fps / 1e6
+            self._video_pixels = params.get("w", 0) * params.get("h", 0)
             self.aspect_changed.emit()
 
     def _on_pause(self, _name, value):
@@ -211,7 +234,9 @@ class Tile(QObject):
         if value and self.end_action != LOOP:
             self.reached_end.emit()
 
-    def _on_file_loaded(self, _event):
+    @_while_open
+    def _after_load(self):
+        """UI thread: restore a saved position or jump to a random one."""
         if self._resume_at:
             self.seek_to(self._resume_at, exact=True)
             self._resume_at = 0.0
@@ -226,7 +251,10 @@ class Tile(QObject):
 
     # --- decoder assignment (UI thread) -------------------------------------
 
+    @_while_open
     def apply_decoder_policy(self):
+        fps = self.player.container_fps or 30.0
+        self.load_mpx = self._video_pixels * fps / 1e6
         use_gpu = self.policy.decide(id(self), self.load_mpx)
         if use_gpu != self.uses_gpu:
             self.uses_gpu = use_gpu
@@ -320,6 +348,7 @@ class Tile(QObject):
     def paused(self) -> bool:
         return self._paused
 
+    @_while_open
     def set_paused(self, paused: bool):
         if not paused and self._at_end:
             self.seek_to(0)  # stopped at the end ("stop" mode): play again from the start
@@ -330,6 +359,7 @@ class Tile(QObject):
     def toggle_pause(self):
         self.set_paused(not self.paused)
 
+    @_while_open
     def set_muted(self, muted: bool):
         self.entry.muted = muted
         if not muted:
@@ -338,14 +368,17 @@ class Tile(QObject):
         if muted:
             self.player.aid = "no"  # skip audio decoding entirely
 
+    @_while_open
     def set_volume(self, volume: float):
         self.entry.volume = max(0.0, min(volume, 1.5))
         self.player.volume = self.entry.volume * 100
 
+    @_while_open
     def set_speed(self, rate: float):
         self.entry.rate = max(0.1, min(rate, 8.0))
         self.player.speed = self.entry.rate
 
+    @_while_open
     def set_end_action(self, action: str):
         self.end_action = action
         self.player.loop_file = "inf" if action == LOOP else "no"
@@ -353,6 +386,7 @@ class Tile(QObject):
     def seek(self, seconds: float):
         self._seek(seconds, "relative", "keyframes")
 
+    @_while_open
     def seek_to(self, seconds: float, exact=False):
         """Seek to a time. Keyframe seeks are fast; ``exact`` lands on the frame."""
         duration = self.player.duration
@@ -360,19 +394,22 @@ class Tile(QObject):
             seconds = min(seconds, max(duration - 0.05, 0.0))
         self._seek(max(0.0, seconds), "absolute", "exact" if exact else "keyframes")
 
+    @_while_open
     def _seek(self, amount, reference, precision):
-        if self.error or self.player.duration is None:
-            return  # nothing playable (yet) to seek in
+        if self.error or self.player.duration is None or not math.isfinite(amount):
+            return  # nothing playable (yet) to seek in, or a nonsense target
         try:
             self.player.seek(amount, reference, precision)
-        except SystemError as e:  # e.g. nothing loaded yet; not worth a crash
+        except (SystemError, ValueError) as e:  # mpv refused (mid-load, odd file)
             log.warning("seek %s %s failed for %s: %s", amount, reference, self.title, e)
 
+    @_while_open
     def seek_random(self):
         duration = self.player.duration
-        if duration:
+        if duration and math.isfinite(duration) and duration > 0:
             self.seek_to(random.uniform(0, duration * 0.9))
 
+    @_while_open
     def zoom_at(self, steps: float, fx: float, fy: float):
         """Zoom by ``steps`` (log2 units) keeping the point (fx, fy) of the tile still.
 
@@ -393,18 +430,23 @@ class Tile(QObject):
             setattr(self.player, f"video_pan_{axis}", new_pan)
         self.player.video_zoom = new_z
 
+    @_while_open
     def reset_zoom(self):
         self.player.video_zoom = 0.0
         self.player.video_pan_x = 0.0
         self.player.video_pan_y = 0.0
 
     def progress(self) -> tuple[float, float]:
+        if self.closed:
+            return (0.0, 0.0)
         return (self.player.time_pos or 0.0, self.player.duration or 0.0)
 
+    @_while_open
     def snapshot_position(self):
         """Copy the current position into the entry before saving a playlist."""
         self.entry.position = self.player.time_pos or 0.0
 
+    @_while_open
     def replace(self, path: str):
         self.entry.path = path
         self.error = None
@@ -415,5 +457,5 @@ class Tile(QObject):
     def close(self):
         """Free the player. GL resources must already be released by the worker."""
         self.policy.release(id(self))
-        self.error = self.error or "closed"  # any late call becomes a no-op
+        self.closed = True  # late calls (queued from mpv threads) become no-ops
         self.player.terminate()
