@@ -257,6 +257,11 @@ def test_keyboard_shortcuts(app, window, clips):
     gap = cfg.gap
     key(Qt.Key_BracketRight)
     assert cfg.gap == gap + 2
+    key(Qt.Key_N, Qt.ControlModifier)  # File > New clears everything
+    assert not c.tiles
+    window.load([clips])
+    pump(app, 1.0)
+    c.hovered = c._layout_tiles[0]
     key(Qt.Key_M, Qt.ControlModifier)
     assert not window.menuBar().isVisible()
     key(Qt.Key_M, Qt.ControlModifier)

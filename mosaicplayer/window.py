@@ -38,7 +38,7 @@ HELP = """<h3>MosaicPlayer keys</h3><table cellspacing=4>
 <tr><td><b>Ctrl+O</b></td><td>open videos</td><td><b>Ctrl+Shift+O</b></td><td>add folder (with subfolders)</td></tr>
 <tr><td><b>Ctrl+L</b></td><td>open playlist</td><td><b>Ctrl+U</b></td><td>open URL</td></tr>
 <tr><td><b>Ctrl+S</b></td><td>save playlist</td><td><b>Ctrl+Shift+S</b></td><td>save playlist as</td></tr>
-<tr><td><b>Ctrl+W</b></td><td>close all videos</td><td><b>Ctrl+Q</b></td><td>quit</td></tr>
+<tr><td><b>Ctrl+N</b>, <b>Ctrl+W</b></td><td>new: clear all videos</td><td><b>Ctrl+Q</b></td><td>quit</td></tr>
 <tr><td><b>Ctrl+,</b></td><td>settings</td><td><b>F1</b>, <b>?</b></td><td>this help</td></tr>
 </table>"""
 
@@ -123,6 +123,8 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
 
         m = self.file_menu = bar.addMenu("&File")
+        self._act(m, "New (clear all videos)", self.close_all, ["Ctrl+N"])
+        m.addSeparator()
         self._act(m, "Open videos…", self.open_files, ["Ctrl+O"])
         self._act(m, "Add folder (with subfolders)…", self.open_folder, ["Ctrl+Shift+O"])
         self._act(m, "Open URL…", self.open_url, ["Ctrl+U"])

@@ -133,7 +133,8 @@ not fixed-size boxes.
 | 1–5, B, R, C, [ ] | layout mode, puzzle tile sizes, reshuffle, crop, gap |
 | F/F11, T, Ctrl+M, H | fullscreen, stay on top, menu bar, stats |
 | Ctrl+O, Ctrl+Shift+O, Ctrl+U, Ctrl+L | open videos, add folder, URL, playlist |
-| Ctrl+S, Ctrl+Shift+S, Ctrl+W | save playlist, save as, close all |
+| Ctrl+N or Ctrl+W | new: clear all videos (back to the default settings) |
+| Ctrl+S, Ctrl+Shift+S | save playlist, save as |
 | Ctrl+, , F1 / ? | settings, help |
 | Ctrl+Q | quit |
 
