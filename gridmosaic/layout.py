@@ -364,6 +364,8 @@ def justified_rows(aspects, width, height, gap=0.0, max_crop=0.12, evenness=1.0,
         if target <= 1:
             break
         rows = _partition_rows(aspects, width, gap, target, k)
+        if rows is None:
+            continue
         rects = _place_rows(rows, aspects, width, height, gap, max_crop)
         score = ev.score_rects(rects)
         if best is None or score > best[0]:
@@ -380,26 +382,38 @@ def justified_columns(aspects, width, height, **kwargs) -> LayoutResult:
     return _finish(rects, aspects, width, height)
 
 
-def _natural_height(aspects, width, gap, i, j):
-    return (width - gap * (j - i - 1)) / sum(aspects[i:j])
-
-
 def _partition_rows(aspects, width, gap, target, k):
-    """Split aspects[0:n] into k consecutive rows with heights close to target."""
+    """Split aspects[0:n] into k consecutive rows with heights close to target.
+
+    Returns None if no split into k rows is reasonable.
+    """
     n = len(aspects)
     inf = float("inf")
+    prefix = [0.0]
+    for a in aspects:
+        prefix.append(prefix[-1] + a)
     cost = [[inf] * (n + 1) for _ in range(k + 1)]
     back = [[0] * (n + 1) for _ in range(k + 1)]
     cost[0][0] = 0.0
+    # With many videos, rows flatter than this cost more than any sensible
+    # layout; skipping them made 150 videos 3-4x faster. Small sets stay exact.
+    shortest = target / 8 if n > 40 else 0.0
     for rows in range(1, k + 1):
+        previous, current, links = cost[rows - 1], cost[rows], back[rows]
         for j in range(rows, n + 1):
-            for i in range(rows - 1, j):
-                if cost[rows - 1][i] == inf:
+            # Longest-first would be O(n) per row end; going back from j, each
+            # extra video makes the row flatter, so stop once it is too flat.
+            for i in range(j - 1, rows - 2, -1):
+                h = (width - gap * (j - i - 1)) / (prefix[j] - prefix[i])
+                if h < shortest and j - i > 1:  # (a lone video can't be split)
+                    break
+                if previous[i] == inf:
                     continue
-                h = _natural_height(aspects, width, gap, i, j)
-                c = cost[rows - 1][i] + math.log(h / target) ** 2
-                if c < cost[rows][j]:
-                    cost[rows][j], back[rows][j] = c, i
+                c = previous[i] + math.log(h / target) ** 2
+                if c < current[j]:
+                    current[j], links[j] = c, i
+    if cost[k][n] == inf:
+        return None
     bounds, j = [], n
     for rows in range(k, 0, -1):
         i = back[rows][j]

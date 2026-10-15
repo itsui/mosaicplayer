@@ -237,3 +237,14 @@ def test_equal_area_avoids_one_tiny_letterboxed_video():
     aspects = [4 / 3, 7 / 3, 7 / 3, 4 / 3, 4 / 3, 16 / 9]
     r = equal_area_layout(aspects, 2233, 1228, gap=2, max_crop=0.15)
     assert r.size_spread < 2.0
+
+
+def test_justified_layouts_stay_fast_with_many_videos():
+    rng = random.Random(5)
+    aspects = [rng.choice([16 / 9, 9 / 16, 4 / 3, 3 / 4, 1.0, 21 / 9, 0.47]) for _ in range(150)]
+    for fn in (justified_rows, justified_columns):
+        start = time.perf_counter()
+        r = fn(aspects, 3840, 2100, gap=2, max_crop=0.0)
+        assert time.perf_counter() - start < 0.4  # runs on the UI thread (was 0.3-0.5 s)
+        assert len(r.rects) == 150 and r.coverage > 0.6
+
