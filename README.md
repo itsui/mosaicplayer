@@ -8,7 +8,7 @@ playlists.
 
 ```bash
 ./gridmosaic.sh --setup                 # once: creates ~/.venvs/gridmosaic
-./gridmosaic.sh ~/test.gpls             # or videos, folders (recursive), .m3u
+./gridmosaic.sh ~/test.gpls             # or videos, folders, .m3u
 ./gridmosaic.sh --install-desktop-entry # optional: add to the applications menu
 ```
 
@@ -139,6 +139,10 @@ is hidden).
 
 Stored in `~/.config/gridmosaic/gridmosaic.conf`.
 
+Folders are scanned with their subfolders, in natural order ("2" before "10"),
+skipping hidden folders such as `.Trash-1000`. `.m3u` playlists from VLC
+(`file://` entries) work too.
+
 Adding more than 64 videos at once asks first (add all, or 64 at random):
 every video is its own player.
 
@@ -149,7 +153,8 @@ every video is its own player.
   stalls the UI thread. It stops when the screen is back. For benchmarks with
   the screen off, run with `GRIDMOSAIC_NO_VSYNC=1`.
 - **Black bars around some tiles in the puzzle.** Equal sizes can't always fit
-  every shape exactly. Allow cropping (`C`, 15%) or use *Fill first* (`B`).
+  every shape exactly. Allow cropping (`C`; 15% unless set otherwise in
+  Settings) or use *Fill first* (`B`).
 
 ## Layout of the code
 
