@@ -284,21 +284,29 @@ class Tile(QObject):
             if self.worker is not None:
                 self.worker.wake()
 
-    def render_into_back(self) -> bool:
-        """Render a new frame into the back buffer. True if something was drawn."""
+    def render_into_back(self) -> bool | None:
+        """Render a new frame into the back buffer.
+
+        True if something was drawn, None if the window is drawing from this
+        tile right now (try again shortly), False if there was nothing to do.
+        """
         if self._ctx is None:
             return False
         width, height = self.target.size
         if width < 1 or height < 1:
             return False
-        resized = False
         back = self.target.back
-        if back is None or back.width() != width or back.height() != height:
-            self.target.back = back = QOpenGLFramebufferObject(width, height)
-            resized = True
+        resized = back is None or back.width() != width or back.height() != height
         has_frame = self._ctx.update()
         if not (has_frame or resized or self._dirty):
             return False
+        # Wait until the window is done drawing from this buffer (also before
+        # replacing it with a resized one).
+        if not self.target.claim_back():
+            self._dirty = True  # don't lose the new frame
+            return None
+        if resized:
+            self.target.back = back = QOpenGLFramebufferObject(width, height)
         self._dirty = False
         # Don't wait for the frame's display time: with dozens of tiles those
         # waits add up and the whole wall drops frames.
@@ -306,10 +314,15 @@ class Tile(QObject):
                          opengl_fbo={"w": width, "h": height, "fbo": back.handle()})
         return True
 
-    def swap_buffers(self):
+    def swap_buffers(self, written=None):
+        """Show the frame just rendered; ``written`` is the fence after rendering it."""
         self.frames_drawn += 1
         with self.target.lock:
             self.target.front, self.target.back = self.target.back, self.target.front
+            old, self.target.write_fence = self.target.write_fence, (
+                written.acquire() if written is not None else None)
+        if old is not None:
+            old.release()  # an earlier frame the window never drew
         # The new back buffer still holds an older frame; re-render it next time
         # even if mpv has no new frame, so both buffers converge after a resize.
         self._dirty = self._dirty or self.target.back is None
@@ -318,6 +331,7 @@ class Tile(QObject):
         if self._ctx is not None:
             self._ctx.free()
             self._ctx = None
+        self.target.drop_fences()
         with self.target.lock:
             self.target.front = self.target.back = None
 

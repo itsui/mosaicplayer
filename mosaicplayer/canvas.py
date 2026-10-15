@@ -7,6 +7,7 @@ GridPlayer's design of one native window and one GL context per video.
 
 from __future__ import annotations
 
+import logging
 import os
 import random
 import threading
@@ -21,9 +22,11 @@ from .config import Config
 from .layout import (LayoutResult, Rect, fixed_grid, grid_layout, justified_columns,
                      justified_rows, puzzle)
 from .playlist import Entry, natural_key, next_in_folder, siblings
-from .render import RenderPool
+from .render import Fence, RenderPool, sync_functions
 from .options import NEXT, RANDOM
 from .tile import DecoderPolicy, Tile
+
+log = logging.getLogger(__name__)
 
 GL_COLOR_BUFFER_BIT = 0x4000
 
@@ -388,6 +391,8 @@ class Canvas(QOpenGLWidget):
         f.glViewport(0, 0, viewport.width(), viewport.height())
         blitter = self._blitter
         blitter.bind()
+        drawn = []  # targets read this frame: their buffers get a fence below
+        released = []  # workers' write fences waited for (released after the frame)
         for tile, rect in zip(self._layout_tiles, self.rects):
             if tile not in self.tiles:
                 continue
@@ -398,10 +403,32 @@ class Canvas(QOpenGLWidget):
                 fbo = tile.target.front
                 if fbo is None:
                     continue
+                written = tile.target.take_write_fence()
+                if written is not None:
+                    written.gpu_wait()  # the frame must be fully rendered first
+                    released.append(written)
                 target = QRectF(round(shown.x), round(shown.y), round(shown.w), round(shown.h))
                 transform = QOpenGLTextureBlitter.targetTransform(target, viewport)
                 blitter.blit(fbo.texture(), transform, QOpenGLTextureBlitter.OriginTopLeft)
+                tile.target.reading = True
+                drawn.append((tile.target, fbo))
         blitter.release()
+        if drawn:
+            # Workers must not render into these buffers until the GPU has drawn
+            # this frame from them (see render.Fence).
+            try:
+                fence = Fence(sync_functions(QOpenGLContext.currentContext()))
+                f.glFlush()  # other contexts can only wait for a fence once it's flushed
+            except Exception:  # no fences: play on (with the old risk of flicker)
+                log.exception("could not create an OpenGL fence")
+                fence = None
+            for target, fbo in drawn:
+                with target.lock:
+                    old = target.mark_read(fbo, fence)
+                if old is not None:
+                    old.release()
+        for fence in released:
+            fence.release()
         p.endNativePainting()
         if time.perf_counter() - self._animation_start < ANIMATION_S:
             self.update()  # keep animating even if no video has a new frame

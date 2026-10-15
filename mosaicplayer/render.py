@@ -10,15 +10,82 @@ in parallel.
 
 from __future__ import annotations
 
+import ctypes
 import logging
 import queue
 import threading
+import time
 
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtGui import QOffscreenSurface, QOpenGLContext
 from PySide6.QtOpenGL import QOpenGLFramebufferObject
 
 log = logging.getLogger(__name__)
+
+
+GL_SYNC_GPU_COMMANDS_COMPLETE = 0x9117
+GL_TIMEOUT_IGNORED = 0xFFFFFFFFFFFFFFFF
+
+
+class _SyncFunctions:
+    """glFenceSync / glWaitSync / glDeleteSync (PySide6 has no bindings for them)."""
+
+    def __init__(self, ctx: QOpenGLContext):
+        def load(name, restype, *argtypes):
+            address = int(ctx.getProcAddress(name))
+            if not address:
+                raise RuntimeError(f"OpenGL function {name.decode()} is not available")
+            return ctypes.CFUNCTYPE(restype, *argtypes)(address)
+
+        self.fence = load(b"glFenceSync", ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint)
+        self.wait = load(b"glWaitSync", None, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint64)
+        self.delete = load(b"glDeleteSync", None, ctypes.c_void_p)
+
+
+_gl_sync: _SyncFunctions | None = None
+_fence_lock = threading.Lock()
+
+
+def sync_functions(ctx: QOpenGLContext) -> _SyncFunctions:
+    global _gl_sync
+    if _gl_sync is None:
+        _gl_sync = _SyncFunctions(ctx)
+    return _gl_sync
+
+
+class Fence:
+    """A GPU fence placed after the window drew a frame, shared by the tiles it read.
+
+    The window and the workers use different OpenGL contexts, whose commands
+    the GPU may run in any order. Without a fence, a worker could start
+    rendering the next video frame into a buffer while the GPU was still
+    drawing the window from it: mpv clears the buffer first, so tiles
+    flickered black (2% of frames with 17 videos at 60 fps).
+    """
+
+    def __init__(self, gl: _SyncFunctions):
+        self._gl = gl
+        self.handle = gl.fence(GL_SYNC_GPU_COMMANDS_COMPLETE, 0)
+        self._refs = 0
+
+    def acquire(self) -> "Fence":
+        with _fence_lock:
+            self._refs += 1
+        return self
+
+    def release(self):
+        """Drop one reference (needs a current context of the share group)."""
+        with _fence_lock:
+            self._refs -= 1
+            dead = self._refs == 0
+        if dead and self.handle:
+            self._gl.delete(self.handle)  # deferred by GL while a wait still uses it
+            self.handle = None
+
+    def gpu_wait(self):
+        """Make this thread's later GPU commands wait for the fence (no CPU wait)."""
+        if self.handle:
+            self._gl.wait(self.handle, 0, GL_TIMEOUT_IGNORED)
 
 
 class TileTarget:
@@ -29,6 +96,49 @@ class TileTarget:
         self.front: QOpenGLFramebufferObject | None = None  # read by the window
         self.back: QOpenGLFramebufferObject | None = None  # written by the worker
         self.size = (0, 0)  # requested by the window
+        # Set by the window while it draws from this tile, until its fence exists.
+        self.reading = False
+        # Per buffer (by id): fence after the window last drew from it. Waiting
+        # for that one, not the latest frame's, rarely waits at all: by the time
+        # a buffer comes back to be rendered into, that frame is usually done.
+        self.read_fences: dict[int, Fence] = {}
+        # Fence after the worker rendered the current front buffer; the window
+        # makes the GPU wait for it before drawing from that buffer.
+        self.write_fence: Fence | None = None
+
+    def mark_read(self, fbo, fence: "Fence | None"):
+        """Window (holding ``lock``): it drew from ``fbo`` up to ``fence``."""
+        old = self.read_fences.pop(id(fbo), None)
+        if fence is not None:
+            self.read_fences[id(fbo)] = fence.acquire()
+        self.reading = False
+        return old  # to release outside the lock
+
+    def claim_back(self) -> bool:
+        """Worker: make the back buffer safe to render into, or False to retry soon."""
+        with self.lock:
+            if self.reading:
+                return False  # the window is drawing from this tile right now
+            back = self.back
+            fence = self.read_fences.pop(id(back), None) if back is not None else None
+        if fence is not None:
+            fence.gpu_wait()
+            fence.release()
+        return True
+
+    def take_write_fence(self) -> "Fence | None":
+        """Window (holding ``lock``): the fence to wait for before drawing the front."""
+        fence, self.write_fence = self.write_fence, None
+        return fence
+
+    def drop_fences(self):
+        with self.lock:
+            fences, self.read_fences = list(self.read_fences.values()), {}
+            if self.write_fence is not None:
+                fences.append(self.write_fence)
+                self.write_fence = None
+        for fence in fences:
+            fence.release()
 
 
 class RenderWorker(QThread):
@@ -88,6 +198,7 @@ class RenderWorker(QThread):
     def run(self):
         self._ctx.makeCurrent(self._surface)
         f = self._ctx.functions()
+        gl = sync_functions(self._ctx)
         while self._running:
             self._wake.wait(0.1)
             self._wake.clear()
@@ -95,17 +206,30 @@ class RenderWorker(QThread):
             with self._tiles_lock:
                 tiles = list(self.tiles)
             rendered = []
+            deferred = False
             for tile in tiles:
                 try:
-                    if tile.render_into_back():
+                    drew = tile.render_into_back()
+                    if drew:
                         rendered.append(tile)
+                    elif drew is None:
+                        deferred = True  # the window was drawing from it
                 except Exception:  # keep the worker alive whatever one tile does
                     log.exception("rendering %s failed", tile.title)
             if rendered:
-                f.glFinish()  # textures must be complete before the window samples them
+                # The window must not draw these frames before the GPU finished
+                # rendering them. A fence lets its GPU wait for that, instead of
+                # this thread blocking in glFinish after every batch.
+                fence = Fence(gl)
+                f.glFlush()  # other contexts can only wait for a flushed fence
                 for tile in rendered:
-                    tile.swap_buffers()
+                    tile.swap_buffers(fence)
+                fence.acquire()
+                fence.release()  # the batch's own reference: deleted once all are done
                 self.pool.notify()
+            if deferred:
+                time.sleep(0.001)  # the window is mid-frame; try those tiles again
+                self._wake.set()
         self._run_calls()
         with self._tiles_lock:
             for tile in self.tiles:
