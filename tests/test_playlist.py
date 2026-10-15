@@ -1,3 +1,5 @@
+import os
+
 from gridmosaic.playlist import Entry, Playlist, expand_inputs, read_gpls, write_gpls
 
 SAMPLE = """#GRIDPLAYER
@@ -117,3 +119,42 @@ def test_latin1_m3u(tmp_path):
     m3.write_bytes("#EXTM3U\nvidéo.mp4\n".encode("cp1252"))  # written by an old Windows tool
     entries, _ = expand_inputs([m3])
     assert [e.path for e in entries] == [str(tmp_path / "vidéo.mp4")]
+
+
+def test_file_uris_become_paths(tmp_path):
+    from gridmosaic.playlist import expand_inputs, local_path, read_m3u
+    video = tmp_path / "my clip é.mp4"
+    video.write_bytes(b"")
+    uri = video.as_uri()  # file:///…/my%20clip%20%C3%A9.mp4, as VLC writes them
+    assert local_path(uri) == str(video)
+    assert local_path("file://localhost" + uri[7:]) == str(video)
+    assert local_path("https://example.com/a%20b.mp4") == "https://example.com/a%20b.mp4"
+    m3u = tmp_path / "vlc.m3u"
+    m3u.write_text(f"#EXTM3U\n#EXTINF:5,clip\n{uri}\n")
+    assert [e.path for e in read_m3u(m3u).entries] == [str(video)]
+    assert [e.path for e in expand_inputs([uri])[0]] == [str(video)]
+
+
+def test_folder_scan_skips_hidden_folders_and_sorts_naturally(tmp_path):
+    from gridmosaic.playlist import expand_inputs
+    for name in ["clip 10.mp4", "clip 2.mp4", "Clip 1.mp4", ".Trash-1000/files/old.mp4",
+                 "sub/.thumbs/t.mp4", "sub/a.mp4"]:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(b"")
+    names = [os.path.relpath(e.path, tmp_path) for e in expand_inputs([tmp_path])[0]]
+    assert names == ["Clip 1.mp4", "clip 2.mp4", "clip 10.mp4", os.path.join("sub", "a.mp4")]
+    hidden = tmp_path / ".Trash-1000"  # chosen directly, a hidden folder is scanned
+    assert len(expand_inputs([hidden])[0]) == 1
+
+
+def test_saving_keeps_permissions_and_symlinks(tmp_path):
+    from gridmosaic.playlist import Entry, Playlist, read_gpls, write_gpls
+    real = tmp_path / "real.gpls"
+    write_gpls(real, Playlist([Entry("/v/a.mp4")]))
+    os.chmod(real, 0o644)
+    link = tmp_path / "link.gpls"
+    link.symlink_to(real)
+    write_gpls(link, Playlist([Entry("/v/a.mp4"), Entry("/v/b.mp4")]))
+    assert link.is_symlink()
+    assert len(read_gpls(real).entries) == 2
+    assert (real.stat().st_mode & 0o777) == 0o644

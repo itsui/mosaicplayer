@@ -20,7 +20,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from .config import Config
 from .layout import (LayoutResult, Rect, fixed_grid, grid_layout, justified_columns,
                      justified_rows, puzzle)
-from .playlist import Entry, siblings
+from .playlist import Entry, natural_key, siblings
 from .render import RenderPool
 from .options import NEXT, RANDOM
 from .tile import DecoderPolicy, Tile
@@ -688,7 +688,7 @@ class Canvas(QOpenGLWidget):
         self.schedule_relayout(reshuffle=True)
 
     def sort_by_name(self):
-        self.tiles.sort(key=lambda t: t.title.lower())
+        self.tiles.sort(key=lambda t: natural_key(t.title))
         self.schedule_relayout()
 
     def set_solo(self, tile: Tile | None):
