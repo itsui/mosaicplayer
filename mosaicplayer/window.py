@@ -19,7 +19,7 @@ from .playlist import (PLAYLIST_EXTENSIONS, Entry, Playlist, expand_inputs, is_v
 from .settings_dialog import RELOAD_FIELDS, SettingsDialog
 from .options import END_ACTIONS
 
-HELP = """<h3>GridMosaic keys</h3><table cellspacing=4>
+HELP = """<h3>MosaicPlayer keys</h3><table cellspacing=4>
 <tr><td><b>Space</b></td><td>pause / play all</td><td><b>Click</b></td><td>pause one</td></tr>
 <tr><td><b>M</b></td><td>mute / unmute all</td><td><b>Middle-click</b></td><td>mute / unmute one</td></tr>
 <tr><td><b>Wheel</b></td><td>seek ±5 s (Shift ±30 s)</td><td><b>← →</b></td><td>seek hovered video</td></tr>
@@ -52,10 +52,10 @@ class MainWindow(QMainWindow):
     def __init__(self, config: Config):
         super().__init__()
         self.cfg = config
-        self.setWindowTitle("GridMosaic")
+        self.setWindowTitle("MosaicPlayer")
         self.resize(1600, 900)
         self.setAcceptDrops(True)
-        self._store = QSettings("gridmosaic", "window")
+        self._store = QSettings("mosaicplayer", "window")
         self._playlist_params: dict = {}
         self._playlist_path: str | None = None
         self._paused_by_minimize = False
@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
 
         m = self.help_menu = bar.addMenu("&Help")
         self._act(m, "Keyboard and mouse", self.show_help, ["F1", "?", "Shift+?"])
-        self._act(m, "About GridMosaic", self.show_about)
+        self._act(m, "About MosaicPlayer", self.show_about)
 
     def _fill_recent(self):
         self.recent_menu.clear()
@@ -557,8 +557,8 @@ class MainWindow(QMainWindow):
 
     def show_about(self):
         QMessageBox.about(
-            self, "About GridMosaic",
-            f"<h3>GridMosaic {__version__}</h3>"
+            self, "About MosaicPlayer",
+            f"<h3>MosaicPlayer {__version__}</h3>"
             "<p>Play many videos at once, packed to fill the screen.</p>"
             "<p>Built with mpv and Qt. Reads and writes GridPlayer playlists.</p>")
 
@@ -574,7 +574,7 @@ class MainWindow(QMainWindow):
     def _update_title(self):
         n = len(self.canvas.tiles)
         name = f" — {Path(self._playlist_path).stem}" if self._playlist_path else ""
-        self.setWindowTitle(f"GridMosaic{name} — {n} video{'s' * (n != 1)}" if n else "GridMosaic")
+        self.setWindowTitle(f"MosaicPlayer{name} — {n} video{'s' * (n != 1)}" if n else "MosaicPlayer")
         self._empty.setVisible(n == 0)
 
     def changeEvent(self, event):

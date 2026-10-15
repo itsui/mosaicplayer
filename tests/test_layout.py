@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from gridmosaic.layout import (equal_area_layout, fixed_grid, grid_layout, justified_columns,
+from mosaicplayer.layout import (equal_area_layout, fixed_grid, grid_layout, justified_columns,
                                justified_rows, puzzle, puzzle_layout)
 
 EPS = 1e-6
@@ -216,7 +216,7 @@ def test_extreme_weights_still_lay_out(weights):
 
 def test_quick_layout_stays_quick_and_large_searches_resume():
     aspects = _mixed(100, seed=21) + [1.0] * 10  # five shapes: a slow equal-area search
-    import gridmosaic.layout as layout_module
+    import mosaicplayer.layout as layout_module
     layout_module._MEMOS.clear()
     start = time.perf_counter()
     quick = puzzle(aspects, 2233, 1228, max_crop=0.15, time_budget=0.12, quick=True)

@@ -1,4 +1,4 @@
-# GridMosaic
+# MosaicPlayer
 
 Play many videos at once, packed like a puzzle to fill the screen. A rebuild of
 [GridPlayer](https://github.com/vzhd1701/gridplayer) that fixes its two main
@@ -7,12 +7,17 @@ a mix of portrait and landscape videos. Reads and writes GridPlayer `.gpls`
 playlists.
 
 ```bash
-./gridmosaic.sh --setup                 # once: creates ~/.venvs/gridmosaic
-./gridmosaic.sh ~/test.gpls             # or videos, folders, .m3u
-./gridmosaic.sh --install-desktop-entry # optional: add to the applications menu
+./mosaicplayer.sh --setup       # once: creates ~/.venvs/mosaicplayer
+./mosaicplayer.sh --install     # adds MosaicPlayer (with its icon) to the applications menu
+./mosaicplayer.sh ~/test.gpls   # or videos, folders, .m3u
 ```
 
 Needs libmpv (`libmpv2` on Debian/Ubuntu/Mint) and Python 3.11+.
+
+The menu entry (under Sound & Video) runs this checkout, so changes to the
+code show up the next time you start it. `--uninstall` removes the entry; your
+settings stay. Formerly *GridMosaic*: settings from that name are imported on
+the first start.
 
 Command-line options apply to that run only (your saved settings stay as they
 were, unless you change the same setting in the app):
@@ -24,7 +29,7 @@ were, unless you change the same setting in the app):
 
 ## What's different from GridPlayer
 
-| | GridPlayer 0.5.5 | GridMosaic |
+| | GridPlayer 0.5.5 | MosaicPlayer |
 |---|---|---|
 | Player engine | VLC 3 (python-vlc), one process per 4 videos | libmpv, one process |
 | GPU decoding | VDPAU (legacy API) | NVDEC, only where it pays off |
@@ -37,7 +42,7 @@ were, unless you change the same setting in the app):
 
 Your 32-video `test.gpls` (h264, 480p–1080p):
 
-| | GridPlayer `vlc_hw` | GridPlayer `vlc_sw` | GridMosaic (auto) |
+| | GridPlayer `vlc_hw` | GridPlayer `vlc_sw` | MosaicPlayer (auto) |
 |---|---|---|---|
 | Smooth? | no — NVDEC pinned at 100% | yes | yes — 60 redraws/s, ~29 fps per tile |
 | CPU | ~1 core | ~6.5 cores | ~2.8 cores |
@@ -137,7 +142,7 @@ is hidden).
   colour, stay on top, menu bar, start fullscreen.
 - **Playlists:** save positions, save paused state, recent playlists.
 
-Stored in `~/.config/gridmosaic/gridmosaic.conf`.
+Stored in `~/.config/mosaicplayer/mosaicplayer.conf`.
 
 Folders are scanned with their subfolders, in natural order ("2" before "10"),
 skipping hidden folders such as `.Trash-1000`. `.m3u` playlists from VLC
@@ -151,7 +156,7 @@ every video is its own player.
 - **Everything reacts about once a second while the screen is off or locked.**
   The NVIDIA driver throttles vsynced OpenGL windows that aren't displayed, which
   stalls the UI thread. It stops when the screen is back. For benchmarks with
-  the screen off, run with `GRIDMOSAIC_NO_VSYNC=1`.
+  the screen off, run with `MOSAICPLAYER_NO_VSYNC=1`.
 - **Black bars around some tiles in the puzzle.** Equal sizes can't always fit
   every shape exactly. Allow cropping (`C`; 15% unless set otherwise in
   Settings) or use *Fill first* (`B`).
@@ -159,19 +164,20 @@ every video is its own player.
 ## Layout of the code
 
 ```
-gridmosaic/
+mosaicplayer/
   layout.py           packing algorithms (pure Python, unit-tested)
   playlist.py         .gpls / .m3u read+write, folder scanning
   tile.py             one mpv player per video, decoder policy
   render.py           render worker threads (shared GL contexts, double buffers)
   canvas.py           the OpenGL video wall: layout, compositing, mouse
   window.py           menus, shortcuts, drag and drop, open/save
+  icons/              app icon in the sizes the menu and taskbar use
   settings_dialog.py  the settings window
   config.py           persisted settings
   options.py          option names (importable without libmpv)
 tests/                layout, playlist, config and end-to-end tests (pytest)
 ```
 
-Run the tests with `~/.venvs/gridmosaic/bin/python -m pytest tests/`. The
+Run the tests with `~/.venvs/mosaicplayer/bin/python -m pytest tests/`. The
 end-to-end tests open a small window with generated clips (they need a display
 and ffmpeg) and keep their settings in a temporary folder.

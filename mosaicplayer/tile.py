@@ -228,6 +228,11 @@ class Tile(QObject):
             self.seek_random()
 
     def _on_end_file(self, event):
+        if self.closed:
+            # Closing frees the render context first, which mpv reports as a
+            # playback error. Signalling it from here during teardown kept the
+            # closed tile (and its player) alive for good.
+            return
         reason = getattr(event.data, "reason", None)
         if reason == mpv.MpvEventEndFile.ERROR:
             self.error = "cannot play this file"

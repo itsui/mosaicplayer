@@ -1,6 +1,6 @@
 import os
 
-from gridmosaic.playlist import Entry, Playlist, expand_inputs, read_gpls, write_gpls
+from mosaicplayer.playlist import Entry, Playlist, expand_inputs, read_gpls, write_gpls
 
 SAMPLE = """#GRIDPLAYER
 #P:{"grid_state":{"mode":"auto_cols","is_fit":true,"size":4},"seek_sync_mode":"disabled"}
@@ -122,7 +122,7 @@ def test_latin1_m3u(tmp_path):
 
 
 def test_file_uris_become_paths(tmp_path):
-    from gridmosaic.playlist import expand_inputs, local_path, read_m3u
+    from mosaicplayer.playlist import expand_inputs, local_path, read_m3u
     video = tmp_path / "my clip é.mp4"
     video.write_bytes(b"")
     uri = video.as_uri()  # file:///…/my%20clip%20%C3%A9.mp4, as VLC writes them
@@ -136,7 +136,7 @@ def test_file_uris_become_paths(tmp_path):
 
 
 def test_folder_scan_skips_hidden_folders_and_sorts_naturally(tmp_path):
-    from gridmosaic.playlist import expand_inputs
+    from mosaicplayer.playlist import expand_inputs
     for name in ["clip 10.mp4", "clip 2.mp4", "Clip 1.mp4", ".Trash-1000/files/old.mp4",
                  "sub/.thumbs/t.mp4", "sub/a.mp4"]:
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
@@ -148,7 +148,7 @@ def test_folder_scan_skips_hidden_folders_and_sorts_naturally(tmp_path):
 
 
 def test_saving_keeps_permissions_and_symlinks(tmp_path):
-    from gridmosaic.playlist import Entry, Playlist, read_gpls, write_gpls
+    from mosaicplayer.playlist import Entry, Playlist, read_gpls, write_gpls
     real = tmp_path / "real.gpls"
     write_gpls(real, Playlist([Entry("/v/a.mp4")]))
     os.chmod(real, 0o644)
@@ -161,7 +161,7 @@ def test_saving_keeps_permissions_and_symlinks(tmp_path):
 
 
 def test_next_in_folder(tmp_path):
-    from gridmosaic.playlist import next_in_folder
+    from mosaicplayer.playlist import next_in_folder
     for name in ["clip 1.mp4", "clip 2.mp4", "clip 10.mp4", "notes.txt"]:
         (tmp_path / name).write_bytes(b"")
     d = str(tmp_path)

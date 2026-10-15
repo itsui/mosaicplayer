@@ -1,4 +1,4 @@
-"""gridmosaic [videos | folders | playlist.gpls ...]"""
+"""mosaicplayer [videos | folders | playlist.gpls ...]"""
 
 import argparse
 import locale
@@ -7,9 +7,10 @@ import os
 import signal
 import socket
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QSocketNotifier, QTimer
-from PySide6.QtGui import QSurfaceFormat
+from PySide6.QtGui import QIcon, QSurfaceFormat
 from PySide6.QtWidgets import QApplication
 
 from .layout import LAYOUT_MODES
@@ -89,7 +90,7 @@ def apply_overrides(cfg, overrides: dict):
 
 def main(argv=None):
     limit_malloc_arenas()
-    parser = argparse.ArgumentParser(prog="gridmosaic", description=__doc__)
+    parser = argparse.ArgumentParser(prog="mosaicplayer", description=__doc__)
     parser.add_argument("inputs", nargs="*", help="video files, folders or .gpls/.m3u playlists")
     parser.add_argument("--layout", choices=list(LAYOUT_MODES), help="packing mode")
     parser.add_argument("--decoder", choices=list(DECODER_MODES), help="decoder mode")
@@ -108,29 +109,39 @@ def main(argv=None):
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.WARNING)
 
     fmt = QSurfaceFormat()
-    # vsync: one composed frame per display refresh. GRIDMOSAIC_NO_VSYNC=1 turns it
+    # vsync: one composed frame per display refresh. MOSAICPLAYER_NO_VSYNC=1 turns it
     # off for benchmarks: with the monitor off, NVIDIA throttles vsynced swaps to
     # ~1 Hz, which stalls the UI thread and every Qt timer.
-    fmt.setSwapInterval(0 if os.environ.get("GRIDMOSAIC_NO_VSYNC") else 1)
+    fmt.setSwapInterval(0 if os.environ.get("MOSAICPLAYER_NO_VSYNC") else 1)
     QSurfaceFormat.setDefaultFormat(fmt)
 
-    app = QApplication(sys.argv[:1])
-    app.setApplicationName("GridMosaic")
-    app.setOrganizationName("gridmosaic")
+    # The program name becomes the window's X11 class name; with "python -m"
+    # it would be "__main__.py".
+    app = QApplication(["mosaicplayer"])
+    app.setApplicationName("MosaicPlayer")
+    app.setOrganizationName("mosaicplayer")
+    # Matches mosaicplayer.desktop, so the menu entry and the taskbar button
+    # are recognised as the same app (and show its icon).
+    app.setDesktopFileName("mosaicplayer")
+    icon = QIcon()
+    for png in sorted((Path(__file__).parent / "icons").glob("mosaicplayer-*.png")):
+        icon.addFile(str(png))
+    app.setWindowIcon(icon)
     locale.setlocale(locale.LC_NUMERIC, "C")  # libmpv requires this; Qt resets it
 
-    from .config import Config  # after QApplication
+    from .config import Config, import_old_settings  # after QApplication
     try:
         from .window import MainWindow  # loads libmpv
     except OSError as e:
         if "mpv" not in str(e).lower():
             raise
-        print("GridMosaic needs the mpv library (libmpv), which wasn't found.\n"
+        print("MosaicPlayer needs the mpv library (libmpv), which wasn't found.\n"
               "Install it, e.g. 'sudo apt install libmpv2' (Debian/Ubuntu/Mint) or\n"
-              "'sudo dnf install mpv-libs' (Fedora), then start GridMosaic again.",
+              "'sudo dnf install mpv-libs' (Fedora), then start MosaicPlayer again.",
               file=sys.stderr)
         return 1
 
+    import_old_settings()
     cfg = Config.load()
     overrides = {}
     if args.layout:

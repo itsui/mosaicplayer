@@ -1,4 +1,4 @@
-"""User settings, persisted with QSettings (~/.config/gridmosaic/gridmosaic.conf)."""
+"""User settings, persisted with QSettings (~/.config/mosaicplayer/mosaicplayer.conf)."""
 
 from __future__ import annotations
 
@@ -36,6 +36,23 @@ RANGES = {
     "hide_cursor_ms": (0, 60000),
     "recent_limit": (0, 50),
 }
+
+
+# Settings files from before the rename (GridMosaic): (old, new) QSettings names.
+_RENAMED = ((("gridmosaic", "gridmosaic"), ("mosaicplayer", "mosaicplayer")),
+            (("gridmosaic", "window"), ("mosaicplayer", "window")))
+
+
+def import_old_settings() -> None:
+    """Copy settings saved under the old name the first time MosaicPlayer runs."""
+    for old_name, new_name in _RENAMED:
+        new = QSettings(*new_name)
+        if new.allKeys():
+            continue
+        old = QSettings(*old_name)
+        for key in old.allKeys():
+            new.setValue(key, old.value(key))
+        new.sync()
 
 
 @dataclass
@@ -80,7 +97,7 @@ class Config:
 
     @classmethod
     def load(cls) -> "Config":
-        store = QSettings("gridmosaic", "gridmosaic")
+        store = QSettings("mosaicplayer", "mosaicplayer")
         cfg = cls()
         for f in fields(cls):
             if not store.contains(f.name):
@@ -111,7 +128,7 @@ class Config:
         return cfg
 
     def save(self) -> None:
-        store = QSettings("gridmosaic", "gridmosaic")
+        store = QSettings("mosaicplayer", "mosaicplayer")
         for f in fields(self):
             store.setValue(f.name, getattr(self, f.name))
         store.setValue("config_version", CONFIG_VERSION)

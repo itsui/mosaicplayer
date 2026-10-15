@@ -35,7 +35,7 @@ def _note(text: str) -> QLabel:
 class SettingsDialog(QDialog):
     def __init__(self, config: Config, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("GridMosaic settings")
+        self.setWindowTitle("MosaicPlayer settings")
         self.setMinimumWidth(560)
         self._original = config
         self.result_config: Config | None = None

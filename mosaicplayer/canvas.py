@@ -119,6 +119,7 @@ class Canvas(QOpenGLWidget):
         return tile
 
     def _destroy_tile(self, tile: Tile):
+        tile.closed = True  # from here on, mpv's late reports are ignored
         if self.pool is not None:
             self.pool.remove(tile)  # waits until its GL objects are freed
         if tile in self._unassigned:
@@ -157,6 +158,10 @@ class Canvas(QOpenGLWidget):
 
     def _forget_from_layout(self, ids: set[int]):
         """Drop closed tiles from what's drawn and clickable until the next layout."""
+        # A layout still being computed for the old set would put them back
+        # (clickable, and keeping the closed players alive): ignore it.
+        self._layout_generation += 1
+        self._refine_token += 1
         kept = [(t, r) for t, r in zip(self._layout_tiles, self.rects) if id(t) not in ids]
         self._layout_tiles = [t for t, _ in kept]
         self.rects = [r for _, r in kept]
@@ -756,6 +761,7 @@ class Canvas(QOpenGLWidget):
     def shutdown(self):
         for tile in self.tiles:
             self._destroy_tile(tile)
+        self._forget_from_layout({id(t) for t in self.tiles})
         self.tiles.clear()
         if self.pool is not None:
             self.pool.stop()

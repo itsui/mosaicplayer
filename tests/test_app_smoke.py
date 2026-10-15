@@ -45,8 +45,8 @@ def pump(app, seconds):
 
 @pytest.fixture
 def window(app, tmp_path, monkeypatch):
-    from gridmosaic.config import Config
-    from gridmosaic.window import MainWindow
+    from mosaicplayer.config import Config
+    from mosaicplayer.window import MainWindow
     cfg = Config()
     monkeypatch.setattr(cfg, "save", lambda: None)
     win = MainWindow(cfg)
@@ -58,9 +58,9 @@ def window(app, tmp_path, monkeypatch):
 
 
 def test_full_session(app, window, clips, tmp_path):
-    from gridmosaic.layout import LAYOUT_MODES
-    from gridmosaic.playlist import read_gpls
-    from gridmosaic.options import END_ACTIONS
+    from mosaicplayer.layout import LAYOUT_MODES
+    from mosaicplayer.playlist import read_gpls
+    from mosaicplayer.options import END_ACTIONS
 
     c = window.canvas
     window.load([clips])
@@ -135,7 +135,7 @@ def test_full_session(app, window, clips, tmp_path):
 
 
 def test_focus_mode_and_merged_playlists(app, window, clips, tmp_path):
-    from gridmosaic.playlist import Entry, Playlist, write_gpls
+    from mosaicplayer.playlist import Entry, Playlist, write_gpls
     c = window.canvas
     window.load([clips])
     pump(app, 2.5)
@@ -187,7 +187,7 @@ def test_stop_at_end_then_play_restarts(app, window, clips):
 def test_closed_tiles_are_freed(app, window, clips):
     import gc
     from PySide6.QtCore import QCoreApplication, QEvent
-    from gridmosaic.tile import Tile
+    from mosaicplayer.tile import Tile
     c = window.canvas
     for _ in range(3):
         window.load([clips])
@@ -231,6 +231,14 @@ def test_keyboard_shortcuts(app, window, clips):
     c.setFocus()
 
     def key(k, mod=Qt.NoModifier):
+        # Shortcuts only reach the active window. While someone is using the
+        # desktop, the window manager may keep focus elsewhere: skip, don't fail.
+        deadline = time.monotonic() + 3
+        while app.activeWindow() is not window and time.monotonic() < deadline:
+            window.activateWindow()
+            pump(app, 0.05)
+        if app.activeWindow() is not window:
+            pytest.skip("the window manager did not give the test window keyboard focus")
         QTest.keyClick(c, k, mod)
         pump(app, 0.2)
 
@@ -283,7 +291,7 @@ def test_overlay_timer_idles(app, window, clips):
 
 
 def test_many_videos_asks_first(app, window, clips, monkeypatch):
-    from gridmosaic.playlist import Entry
+    from mosaicplayer.playlist import Entry
     from PySide6.QtWidgets import QMessageBox
     monkeypatch.setattr(QMessageBox, "exec", lambda self: None)  # dialog "cancelled"
     monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: None)
@@ -294,7 +302,7 @@ def test_many_videos_asks_first(app, window, clips, monkeypatch):
 
 def test_settings_dialog_round_trip(app, window):
     from dataclasses import replace
-    from gridmosaic.settings_dialog import SettingsDialog
+    from mosaicplayer.settings_dialog import SettingsDialog
     dialog = SettingsDialog(window.cfg, window)
     dialog.gap.setValue(6)
     dialog.layout_mode.setCurrentIndex(dialog.layout_mode.findData("columns"))
@@ -334,8 +342,8 @@ def test_fullscreen_returns_to_maximized(app, window):
 
 def test_settings_restore_defaults_waits_for_ok(app, window):
     from dataclasses import fields, replace
-    from gridmosaic.config import Config
-    from gridmosaic.settings_dialog import SettingsDialog
+    from mosaicplayer.config import Config
+    from mosaicplayer.settings_dialog import SettingsDialog
     changed = replace(window.cfg, gap=12, max_crop=0.35, decoder_mode="cpu", start_muted=True,
                       background="#123456", recent_files=["a.gpls", "b.gpls"], recent_limit=5)
     dialog = SettingsDialog(changed, window)
@@ -351,7 +359,7 @@ def test_settings_restore_defaults_waits_for_ok(app, window):
 
 def test_settings_trims_recent_playlists(app, window):
     from dataclasses import replace
-    from gridmosaic.settings_dialog import SettingsDialog
+    from mosaicplayer.settings_dialog import SettingsDialog
     dialog = SettingsDialog(replace(window.cfg, recent_files=list("abcdef")), window)
     dialog.recent_limit.setValue(2)
     dialog._accept()
@@ -359,7 +367,7 @@ def test_settings_trims_recent_playlists(app, window):
 
 
 def test_saving_at_once_keeps_saved_positions(app, window, clips, tmp_path):
-    from gridmosaic.playlist import Entry, Playlist, read_gpls, write_gpls
+    from mosaicplayer.playlist import Entry, Playlist, read_gpls, write_gpls
     source = tmp_path / "positions.gpls"
     paths = sorted(str(p) for p in clips.iterdir())[:3]
     write_gpls(source, Playlist([Entry(p, position=1.25) for p in paths]))
@@ -369,7 +377,7 @@ def test_saving_at_once_keeps_saved_positions(app, window, clips, tmp_path):
 
 
 def test_adding_some_at_random_keeps_playlist_order(app, window, clips, monkeypatch):
-    from gridmosaic.playlist import Entry
+    from mosaicplayer.playlist import Entry
     from PySide6.QtWidgets import QMessageBox
     monkeypatch.setattr(QMessageBox, "exec", lambda self: None)
     some = lambda self: next(b for b in self.buttons() if b.text().startswith("Add 64"))
@@ -378,3 +386,15 @@ def test_adding_some_at_random_keeps_playlist_order(app, window, clips, monkeypa
     chosen = window._confirm_many(entries)
     assert len(chosen) == 64
     assert [int(e.path[3:-4]) for e in chosen] == sorted(int(e.path[3:-4]) for e in chosen)
+
+
+def test_layout_in_flight_cannot_bring_back_closed_tiles(app, window, clips):
+    c = window.canvas
+    window.load([clips])
+    pump(app, 2.5)
+    old_tiles, old_result, generation = list(c._layout_tiles), c.layout_info, c._layout_generation
+    window.close_all()
+    # A refine thread that started before the close delivers its result now.
+    c._layout_done.emit(generation, (old_tiles, old_result, None))
+    pump(app, 0.05)
+    assert not c._layout_tiles and c.tile_at(c.rect().center()) is None

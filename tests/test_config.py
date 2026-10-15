@@ -1,10 +1,10 @@
 from PySide6.QtCore import QSettings
 
-from gridmosaic.config import Config
+from mosaicplayer.config import Config
 
 
 def test_damaged_and_unknown_values_fall_back_to_defaults(isolated_settings):
-    store = QSettings("gridmosaic", "gridmosaic")
+    store = QSettings("mosaicplayer", "mosaicplayer")
     store.clear()
     store.setValue("gap", "lots")
     store.setValue("layout_mode", "spiral")
@@ -29,7 +29,7 @@ def test_damaged_and_unknown_values_fall_back_to_defaults(isolated_settings):
 
 
 def test_save_and_load_round_trip(isolated_settings):
-    QSettings("gridmosaic", "gridmosaic").clear()
+    QSettings("mosaicplayer", "mosaicplayer").clear()
     cfg = Config(gap=6, layout_mode="rows", recent_files=["/a.gpls"], start_muted=False)
     cfg.save()
     again = Config.load()
@@ -52,10 +52,10 @@ def test_ctrl_c_and_sigterm_close_cleanly(tmp_path):
     subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i",
                     "testsrc2=size=320x180:rate=25:duration=3", "-pix_fmt", "yuv420p", str(clip)],
                    check=True)
-    env = dict(os.environ, GRIDMOSAIC_NO_VSYNC="1", XDG_CONFIG_HOME=str(tmp_path / "config"),
+    env = dict(os.environ, MOSAICPLAYER_NO_VSYNC="1", XDG_CONFIG_HOME=str(tmp_path / "config"),
                PYTHONPATH=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     for sig in (signal.SIGINT, signal.SIGTERM):
-        proc = subprocess.Popen([sys.executable, "-m", "gridmosaic", str(clip), "--no-save-config"],
+        proc = subprocess.Popen([sys.executable, "-m", "mosaicplayer", str(clip), "--no-save-config"],
                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         time.sleep(4)
         proc.send_signal(sig)
@@ -65,8 +65,8 @@ def test_ctrl_c_and_sigterm_close_cleanly(tmp_path):
 
 
 def test_command_line_overrides_are_not_saved(isolated_settings):
-    from gridmosaic.__main__ import apply_overrides
-    QSettings("gridmosaic", "gridmosaic").clear()
+    from mosaicplayer.__main__ import apply_overrides
+    QSettings("mosaicplayer", "mosaicplayer").clear()
     Config(layout_mode="puzzle", gap=2).save()
     cfg = Config.load()
     apply_overrides(cfg, {"layout_mode": "rows", "gap": 10})
@@ -78,3 +78,22 @@ def test_command_line_overrides_are_not_saved(isolated_settings):
     cfg.save()
     assert Config.load().gap == 6
     assert Config.load().layout_mode == "puzzle"
+
+
+def test_settings_from_the_old_name_are_imported_once(isolated_settings):
+    from mosaicplayer.config import import_old_settings
+    for name in ("mosaicplayer", "window"):
+        QSettings("mosaicplayer", name).clear()
+    old = QSettings("gridmosaic", "gridmosaic")
+    old.setValue("max_crop", 0.0)
+    old.setValue("gap", 6)
+    old.sync()
+    QSettings("gridmosaic", "window").setValue("last_dir", "/videos")
+    import_old_settings()
+    cfg = Config.load()
+    assert (cfg.max_crop, cfg.gap) == (0.0, 6)
+    assert QSettings("mosaicplayer", "window").value("last_dir") == "/videos"
+    cfg.gap = 8
+    cfg.save()
+    import_old_settings()  # already has settings: not overwritten again
+    assert Config.load().gap == 8

@@ -10,7 +10,7 @@ the two apps:
     /path/to/video0.mp4
     /path/to/video1.mp4
 
-Fields GridMosaic doesn't use are kept and written back unchanged.
+Fields MosaicPlayer doesn't use are kept and written back unchanged.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class Entry:
     rate: float = 1.0
     start_random: bool = False
     position: float = 0.0  # seconds; GridPlayer stores milliseconds
-    size_weight: float = 1.0  # relative tile area in puzzle layouts (GridMosaic only)
+    size_weight: float = 1.0  # relative tile area in puzzle layouts (MosaicPlayer only)
     extra: dict = field(default_factory=dict)  # untouched GridPlayer fields
 
     def to_gpls_params(self, save_position=True, save_paused=True) -> dict:
