@@ -11,6 +11,10 @@ def test_damaged_and_unknown_values_fall_back_to_defaults(isolated_settings):
     store.setValue("max_crop", "0.9")
     store.setValue("render_threads", "0")
     store.setValue("titles", "always")
+    store.setValue("layout_effort", "nan")
+    store.setValue("recent_limit", "-3")
+    store.setValue("max_gpu_tiles", "-1")
+    store.setValue("hide_cursor_ms", "1e9")
     store.setValue("config_version", "x")
     store.sync()
     cfg = Config.load()
@@ -20,6 +24,8 @@ def test_damaged_and_unknown_values_fall_back_to_defaults(isolated_settings):
     assert cfg.max_crop == 0.4  # clamped
     assert cfg.render_threads == 1
     assert cfg.titles == "always"  # valid values still load
+    assert cfg.layout_effort == defaults.layout_effort  # NaN would pass a clamp
+    assert (cfg.recent_limit, cfg.max_gpu_tiles, cfg.hide_cursor_ms) == (0, 0, 60000)
 
 
 def test_save_and_load_round_trip(isolated_settings):

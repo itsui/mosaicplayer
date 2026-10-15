@@ -21,6 +21,22 @@ CHOICES = {
     "titles": {"hover", "always", "never"},
 }
 
+# Allowed ranges for numbers (the same as in the settings window). Values out
+# of range in a hand-edited file are clamped; NaN falls back to the default.
+RANGES = {
+    "gap": (0, 40),
+    "max_crop": (0.0, 0.4),
+    "fixed_cols": (0, 20),
+    "fixed_rows": (0, 20),
+    "layout_effort": (0.2, 10.0),
+    "gpu_budget_mpx": (50.0, 20000.0),
+    "max_gpu_tiles": (0, 200),
+    "auto_threshold_mpx": (0.0, 2000.0),
+    "render_threads": (1, 16),
+    "hide_cursor_ms": (0, 60000),
+    "recent_limit": (0, 50),
+}
+
 
 @dataclass
 class Config:
@@ -76,6 +92,11 @@ class Config:
                 continue  # a damaged entry falls back to its default
             if f.name in CHOICES and value not in CHOICES[f.name]:
                 continue
+            if f.name in RANGES:
+                if value != value:  # NaN
+                    continue
+                lo, hi = RANGES[f.name]
+                value = min(max(value, lo), hi)
             setattr(cfg, f.name, value)
         try:
             version = int(store.value("config_version", 1))
@@ -87,10 +108,6 @@ class Config:
                 cfg.max_crop = 0.15
             if abs(cfg.layout_effort - 1.2) < 1e-9:
                 cfg.layout_effort = 2.5
-        cfg.max_crop = min(max(cfg.max_crop, 0.0), 0.4)
-        cfg.gap = min(max(cfg.gap, 0), 40)
-        cfg.render_threads = min(max(cfg.render_threads, 1), 16)
-        cfg.layout_effort = min(max(cfg.layout_effort, 0.2), 10.0)
         return cfg
 
     def save(self) -> None:
@@ -117,5 +134,5 @@ def _coerce(raw, default):
     if isinstance(default, list):
         if raw is None:
             return []
-        return list(raw) if isinstance(raw, (list, tuple)) else [raw]
+        return [str(x) for x in raw] if isinstance(raw, (list, tuple)) else [str(raw)]
     return str(raw)
