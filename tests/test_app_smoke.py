@@ -366,3 +366,15 @@ def test_saving_at_once_keeps_saved_positions(app, window, clips, tmp_path):
     window.load([str(source)])
     window.save_playlist()  # before the videos have loaded
     assert [e.position for e in read_gpls(source).entries] == [1.25] * 3
+
+
+def test_adding_some_at_random_keeps_playlist_order(app, window, clips, monkeypatch):
+    from gridmosaic.playlist import Entry
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: None)
+    some = lambda self: next(b for b in self.buttons() if b.text().startswith("Add 64"))
+    monkeypatch.setattr(QMessageBox, "clickedButton", some)
+    entries = [Entry(f"/v/{i}.mp4") for i in range(100)]
+    chosen = window._confirm_many(entries)
+    assert len(chosen) == 64
+    assert [int(e.path[3:-4]) for e in chosen] == sorted(int(e.path[3:-4]) for e in chosen)

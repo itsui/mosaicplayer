@@ -325,7 +325,9 @@ class MainWindow(QMainWindow):
         if box.clickedButton() is add_all:
             return entries
         if add_some is not None and box.clickedButton() is add_some:
-            return random.sample(entries, room)
+            # A random subset, still in playlist order (rows and grids keep it).
+            keep = sorted(random.sample(range(len(entries)), room))
+            return [entries[i] for i in keep]
         return []
 
     def _remember_playlist(self, path: str, save_target=True):
