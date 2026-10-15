@@ -302,3 +302,27 @@ def test_settings_dialog_round_trip(app, window):
     assert dialog.result_config.layout_mode == "columns"
     window._replace_config(dialog.result_config)
     assert window.cfg.layout_mode == "columns"
+
+
+def test_crop_toggle_keeps_custom_amount(app, window):
+    window.cfg.max_crop = 0.25  # set in Settings
+    window.set_crop(False)
+    assert window.cfg.max_crop == 0.0
+    window.set_crop(True)
+    assert window.cfg.max_crop == 0.25
+
+
+def test_fullscreen_returns_to_maximized(app, window):
+    def wait_for(condition, seconds=4):
+        end = time.monotonic() + seconds
+        while not condition() and time.monotonic() < end:
+            pump(app, 0.05)
+        return condition()
+
+    window.showMaximized()
+    if not wait_for(window.isMaximized):
+        pytest.skip("window manager did not maximize")
+    window.toggle_fullscreen()
+    assert wait_for(window.isFullScreen)
+    window.toggle_fullscreen()
+    assert wait_for(lambda: window.isMaximized() and not window.isFullScreen())

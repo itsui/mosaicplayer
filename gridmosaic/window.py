@@ -58,6 +58,8 @@ class MainWindow(QMainWindow):
         self._playlist_params: dict = {}
         self._playlist_path: str | None = None
         self._paused_by_minimize = False
+        self._crop_when_on = config.max_crop or 0.15  # what C turns cropping back on to
+        self._before_fullscreen = (None, False)  # geometry, was maximized
 
         self.canvas = Canvas(config, self)
         self.setCentralWidget(self.canvas)
@@ -482,10 +484,14 @@ class MainWindow(QMainWindow):
         self.set_layout_mode("fixed-grid")
 
     def set_crop(self, on: bool):
-        self.cfg.max_crop = 0.15 if on else 0.0
+        # Keep a crop amount chosen in Settings when toggling with C.
+        if self.cfg.max_crop > 0:
+            self._crop_when_on = self.cfg.max_crop
+        self.cfg.max_crop = self._crop_when_on if on else 0.0
         self.cfg.save()
         self.canvas.schedule_relayout()
-        self.toast("Cropping up to 15% to fill gaps" if on else "No cropping (may leave gaps)")
+        self.toast(f"Cropping up to {self.cfg.max_crop:.0%} to fill gaps" if on
+                   else "No cropping (may leave gaps)")
 
     def set_gap(self, gap: int):
         self.cfg.gap = max(0, min(gap, 40))
@@ -524,8 +530,13 @@ class MainWindow(QMainWindow):
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
-            self.showNormal()
+            # showFullScreen() drops the maximized state; bring it back.
+            if self._before_fullscreen[1]:
+                self.showMaximized()
+            else:
+                self.showNormal()
         else:
+            self._before_fullscreen = (self.saveGeometry(), self.isMaximized())
             self.showFullScreen()
         self._apply_window_config()
 
@@ -572,7 +583,10 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
 
     def closeEvent(self, event):
-        self._store.setValue("geometry", self.saveGeometry())
+        # Saved while fullscreen, the next start would open fullscreen too
+        # (whatever the "start fullscreen" setting says): keep the window's size.
+        geometry = self._before_fullscreen[0] if self.isFullScreen() else None
+        self._store.setValue("geometry", geometry or self.saveGeometry())
         self.cfg.save()
         self.canvas.shutdown()
         super().closeEvent(event)
