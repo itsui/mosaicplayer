@@ -158,3 +158,15 @@ def test_saving_keeps_permissions_and_symlinks(tmp_path):
     assert link.is_symlink()
     assert len(read_gpls(real).entries) == 2
     assert (real.stat().st_mode & 0o777) == 0o644
+
+
+def test_next_in_folder(tmp_path):
+    from gridmosaic.playlist import next_in_folder
+    for name in ["clip 1.mp4", "clip 2.mp4", "clip 10.mp4", "notes.txt"]:
+        (tmp_path / name).write_bytes(b"")
+    d = str(tmp_path)
+    assert next_in_folder(f"{d}/clip 2.mp4") == f"{d}/clip 10.mp4"
+    assert next_in_folder(f"{d}/clip 10.mp4") == f"{d}/clip 1.mp4"  # wraps around
+    assert next_in_folder(f"{d}//./clip 1.mp4") == f"{d}/clip 2.mp4"  # spelled differently
+    assert next_in_folder(f"{d}/clip 5.mp4") == f"{d}/clip 10.mp4"  # renamed or deleted since
+    assert next_in_folder(f"{d}/missing/x.mp4") is None

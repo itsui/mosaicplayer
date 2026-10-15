@@ -20,7 +20,7 @@ from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from .config import Config
 from .layout import (LayoutResult, Rect, fixed_grid, grid_layout, justified_columns,
                      justified_rows, puzzle)
-from .playlist import Entry, natural_key, siblings
+from .playlist import Entry, natural_key, next_in_folder, siblings
 from .render import RenderPool
 from .options import NEXT, RANDOM
 from .tile import DecoderPolicy, Tile
@@ -191,9 +191,9 @@ class Canvas(QOpenGLWidget):
         if tile not in self.tiles:
             return
         if tile.end_action == NEXT:
-            folder = siblings(tile.entry.path)
-            if tile.entry.path in folder:
-                tile.replace(folder[(folder.index(tile.entry.path) + 1) % len(folder)])
+            following = next_in_folder(tile.entry.path)
+            if following:
+                tile.replace(following)
         elif tile.end_action == RANDOM:
             self.replace_with_random(tile, quiet=True)
 

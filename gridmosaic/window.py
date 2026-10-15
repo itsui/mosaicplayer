@@ -14,7 +14,8 @@ from . import __version__
 from .canvas import Canvas
 from .config import Config
 from .layout import BALANCE_MODES, LAYOUT_MODES
-from .playlist import PLAYLIST_EXTENSIONS, Entry, Playlist, expand_inputs, is_video, write_gpls
+from .playlist import (PLAYLIST_EXTENSIONS, Entry, Playlist, expand_inputs, is_video, local_path,
+                       write_gpls)
 from .settings_dialog import RELOAD_FIELDS, SettingsDialog
 from .options import END_ACTIONS
 
@@ -351,7 +352,7 @@ class MainWindow(QMainWindow):
     def open_url(self):
         url, ok = QInputDialog.getText(self, "Open URL", "Video URL (http, https, rtsp…):")
         if ok and url.strip():
-            self.canvas.add_entries([Entry(url.strip(), muted=self.cfg.start_muted)])
+            self.canvas.add_entries([Entry(local_path(url.strip()), muted=self.cfg.start_muted)])
 
     def open_playlist(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open playlist", self._last_dir(),

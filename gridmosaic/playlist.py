@@ -266,3 +266,17 @@ def siblings(path: str) -> list[str]:
                       key=natural_key)
     except OSError:
         return []
+
+
+def next_in_folder(path: str) -> str | None:
+    """The video after ``path`` in its folder (natural order, wrapping around).
+
+    Matched by name, so a path spelled differently ("a//b.mp4") or a video
+    renamed or deleted since it was opened still has a next one.
+    """
+    folder = siblings(path)
+    if not folder:
+        return None
+    key = natural_key(Path(path).name)
+    later = [f for f in folder if natural_key(Path(f).name) > key]
+    return later[0] if later else folder[0]
