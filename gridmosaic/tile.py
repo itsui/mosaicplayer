@@ -421,8 +421,16 @@ class Tile(QObject):
 
     @_while_open
     def snapshot_position(self):
-        """Copy the current position into the entry before saving a playlist."""
-        self.entry.position = self.player.time_pos or 0.0
+        """Copy the current position into the entry before saving a playlist.
+
+        A video that hasn't loaded yet (or hasn't reached its saved position)
+        keeps the position it was opened with.
+        """
+        if self._resume_at or self.error:
+            return
+        position = self.player.time_pos
+        if position is not None:
+            self.entry.position = position
 
     @_while_open
     def replace(self, path: str):

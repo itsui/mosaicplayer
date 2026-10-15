@@ -352,3 +352,13 @@ def test_settings_trims_recent_playlists(app, window):
     dialog.recent_limit.setValue(2)
     dialog._accept()
     assert dialog.result_config.recent_files == ["a", "b"]
+
+
+def test_saving_at_once_keeps_saved_positions(app, window, clips, tmp_path):
+    from gridmosaic.playlist import Entry, Playlist, read_gpls, write_gpls
+    source = tmp_path / "positions.gpls"
+    paths = sorted(str(p) for p in clips.iterdir())[:3]
+    write_gpls(source, Playlist([Entry(p, position=1.25) for p in paths]))
+    window.load([str(source)])
+    window.save_playlist()  # before the videos have loaded
+    assert [e.position for e in read_gpls(source).entries] == [1.25] * 3
