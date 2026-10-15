@@ -46,7 +46,7 @@ class SettingsDialog(QDialog):
         # Layout
         self.layout_mode = _combo(LAYOUT_MODES, c.layout_mode)
         self.gap = QSpinBox(minimum=0, maximum=40, value=c.gap, suffix=" px")
-        self.max_crop = QSpinBox(minimum=0, maximum=30, value=round(c.max_crop * 100), suffix=" %")
+        self.max_crop = QSpinBox(minimum=0, maximum=40, value=round(c.max_crop * 100), suffix=" %")
         self.fixed_cols = QSpinBox(minimum=0, maximum=20, value=c.fixed_cols, specialValueText="auto")
         self.fixed_rows = QSpinBox(minimum=0, maximum=20, value=c.fixed_rows, specialValueText="auto")
         self.balance = _combo(BALANCE_MODES, c.size_balance)
@@ -162,9 +162,30 @@ class SettingsDialog(QDialog):
             f"{'black' if self._background.lightness() > 128 else 'white'};")
 
     def _defaults(self):
-        keep = dict(recent_files=self._original.recent_files)
-        self.result_config = replace(Config(), **keep)
-        self.accept()
+        """Show the default values; OK applies them, Cancel keeps the current ones."""
+        d = Config()
+        for box, value in ((self.layout_mode, d.layout_mode), (self.balance, d.size_balance),
+                           (self.end_action, d.end_action), (self.decoder_mode, d.decoder_mode),
+                           (self.hwdec_api, d.hwdec_api), (self.scaling, d.scaling),
+                           (self.titles, d.titles)):
+            box.setCurrentIndex(max(0, box.findData(value)))
+        for spin, value in ((self.gap, d.gap), (self.max_crop, round(d.max_crop * 100)),
+                            (self.fixed_cols, d.fixed_cols), (self.fixed_rows, d.fixed_rows),
+                            (self.effort, d.layout_effort), (self.budget, int(d.gpu_budget_mpx)),
+                            (self.max_gpu, d.max_gpu_tiles),
+                            (self.threshold, int(d.auto_threshold_mpx)),
+                            (self.render_threads, d.render_threads),
+                            (self.hide_cursor, d.hide_cursor_ms),
+                            (self.recent_limit, d.recent_limit)):
+            spin.setValue(value)
+        for check, value in ((self.start_muted, d.start_muted), (self.start_random, d.start_random),
+                             (self.pause_min, d.pause_when_minimized), (self.on_top, d.stay_on_top),
+                             (self.menubar, d.show_menubar), (self.start_fs, d.start_fullscreen),
+                             (self.save_positions, d.save_positions),
+                             (self.save_paused, d.save_paused)):
+            check.setChecked(value)
+        self._background = QColor(d.background)
+        self._update_bg_button()
 
     def _accept(self):
         self.result_config = replace(
@@ -196,6 +217,7 @@ class SettingsDialog(QDialog):
             save_positions=self.save_positions.isChecked(),
             save_paused=self.save_paused.isChecked(),
             recent_limit=self.recent_limit.value(),
+            recent_files=self._original.recent_files[:self.recent_limit.value()],
         )
         self.accept()
 

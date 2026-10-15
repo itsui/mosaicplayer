@@ -326,3 +326,29 @@ def test_fullscreen_returns_to_maximized(app, window):
     assert wait_for(window.isFullScreen)
     window.toggle_fullscreen()
     assert wait_for(lambda: window.isMaximized() and not window.isFullScreen())
+
+
+def test_settings_restore_defaults_waits_for_ok(app, window):
+    from dataclasses import fields, replace
+    from gridmosaic.config import Config
+    from gridmosaic.settings_dialog import SettingsDialog
+    changed = replace(window.cfg, gap=12, max_crop=0.35, decoder_mode="cpu", start_muted=True,
+                      background="#123456", recent_files=["a.gpls", "b.gpls"], recent_limit=5)
+    dialog = SettingsDialog(changed, window)
+    assert dialog.max_crop.value() == 35  # not clamped to a lower maximum
+    dialog._defaults()
+    assert dialog.result_config is None  # nothing applied until OK
+    dialog._accept()
+    defaults = Config()
+    for f in fields(Config):
+        expected = changed.recent_files if f.name == "recent_files" else getattr(defaults, f.name)
+        assert getattr(dialog.result_config, f.name) == expected, f.name
+
+
+def test_settings_trims_recent_playlists(app, window):
+    from dataclasses import replace
+    from gridmosaic.settings_dialog import SettingsDialog
+    dialog = SettingsDialog(replace(window.cfg, recent_files=list("abcdef")), window)
+    dialog.recent_limit.setValue(2)
+    dialog._accept()
+    assert dialog.result_config.recent_files == ["a", "b"]
