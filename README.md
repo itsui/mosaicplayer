@@ -72,8 +72,8 @@ none.
    - **Equal** (default): every video gets the same area. A memoised search
      over slicing trees whose splits follow the video count on each side, so
      equal areas are built in; it only chooses split directions and which
-     shapes go where. On the 32-video playlist: tiles within 1.26× of each
-     other at 94.5% coverage with 15% crop (1.46× / 88% with no crop).
+     shapes go where. On the 32-video playlist: tiles within 1.12× of each
+     other at 97.4% coverage with 15% crop (1.46× / 88.6% with no crop).
    - **Balanced**: splits may deviate ±15% when that fills more.
    - **Fill first**: simulated annealing that maximises coverage (97–100%)
      but lets sizes vary 2–3×.

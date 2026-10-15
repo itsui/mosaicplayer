@@ -229,3 +229,11 @@ def test_quick_layout_stays_quick_and_large_searches_resume():
             break
     assert result.method == "equal"
     assert result.size_spread < 2.0
+
+
+def test_equal_area_avoids_one_tiny_letterboxed_video():
+    # A capped letterbox cost made showing one video 5x smaller than the rest
+    # look cheaper than several mild mismatches.
+    aspects = [4 / 3, 7 / 3, 7 / 3, 4 / 3, 4 / 3, 16 / 9]
+    r = equal_area_layout(aspects, 2233, 1228, gap=2, max_crop=0.15)
+    assert r.size_spread < 2.0

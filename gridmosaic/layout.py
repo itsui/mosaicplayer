@@ -564,9 +564,12 @@ class _EqualAreaSearch:
         d = abs(math.log(aspect / self.reps[cls]))
         if d <= self.crop_limit:
             return self.crop_cost * (1.0 - math.exp(-d))
-        # Beyond the crop limit the tile is letterboxed: lose that share of area.
+        # Beyond the crop limit the tile is letterboxed and shows exp(-over) of
+        # its slot. Cost that in log space like the size spread: a saturating
+        # cost made one video shown 5x smaller look cheaper than several mild
+        # mismatches.
         over = d - self.crop_limit
-        return self.crop_cost * (1.0 - math.exp(-self.crop_limit)) + 1.5 * (1.0 - math.exp(-over))
+        return self.crop_cost * (1.0 - math.exp(-self.crop_limit)) + 1.5 * over
 
     def best(self, aspect, counts):
         """Lowest cost (per tile, summed) to fill a rect of this aspect with ``counts``."""
