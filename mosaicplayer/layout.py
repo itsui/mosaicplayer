@@ -709,15 +709,18 @@ def _sub_counts(counts, total, exhaustive=True, window=2):
 
 def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.0,
                       crop_cost=0.5, time_budget=math.inf, big_group=_BIG_GROUP,
-                      seed=0, weights=None, abort=None) -> LayoutResult | None:
+                      seed=0, weights=None, abort=None, polish=None) -> LayoutResult | None:
     """Puzzle where every video gets (nearly) the same area — or an area in
     proportion to its ``weights`` entry when sizes have been adjusted.
 
     ``balance`` 1.0 forces exactly equal areas; lower values let each split
     deviate from equal by up to (1 - balance) to cover more of the screen.
-    Returns None if the search runs past ``time_budget`` seconds or ``abort()``
-    returns True.
+    ``polish`` = (spread_weight, bound) then adjusts each split by up to
+    ``bound`` (relative) to trade evenness of what's visible against coverage
+    (see _polish). Returns None if the search runs past ``time_budget``
+    seconds or ``abort()`` returns True.
     """
+    start = time.perf_counter()
     n = len(aspects)
     if n == 0:
         return LayoutResult([], 0.0, 1.0, 0.0)
@@ -742,12 +745,78 @@ def equal_area_layout(aspects, width, height, gap=0.0, max_crop=0.12, balance=1.
         rng = random.Random(seed)
         for pool in pools:
             rng.shuffle(pool)
-    rects: list[Rect | None] = [None] * n
     keep = 1.0 - max_crop
-    _place_equal(tree, 0.0, 0.0, float(width), float(height), gap, pools, aspects, keep, rects)
-    result = _finish(rects, aspects, width, height, weights)
+    tree = _assign_videos(tree, pools)
+    if polish is not None:
+        left = time_budget - (time.perf_counter() - start)
+        result = _polish(tree, aspects, width, height, gap, keep, weights, *polish,
+                         deadline=time.perf_counter() + max(min(left, 1.0), 0.05), abort=abort)
+    else:
+        result = _place_tree(tree, aspects, width, height, gap, keep, weights)
     result.method = "equal"
     return result
+
+
+def _assign_videos(node, pools):
+    """Class leaves -> video leaves, in the order the slots are placed."""
+    if node[0] == "leaf":
+        return ["leaf", pools[node[1]].pop(0)]
+    op, share, left, right = node
+    return [op, share, _assign_videos(left, pools), _assign_videos(right, pools)]
+
+
+def _place_tree(tree, aspects, width, height, gap, keep, weights) -> LayoutResult:
+    rects: list[Rect | None] = [None] * len(aspects)
+    _place_equal(tree, 0.0, 0.0, float(width), float(height), gap, None, aspects, keep, rects)
+    return _finish(rects, aspects, width, height, weights)
+
+
+def _polish(tree, aspects, width, height, gap, keep, weights, spread_weight, bound,
+            deadline=math.inf, abort=None) -> LayoutResult:
+    """Nudge the split points of a finished tree to improve what's visible.
+
+    Equal slots don't mean equal videos: a video letterboxed in its slot shows
+    less, and the space around it is wasted. Coordinate descent moves each
+    split by small steps (each within ``bound`` of where the search put it),
+    keeping a move when coverage - spread_weight * log2(spread) improves, with
+    spread measured on the visible areas. A high weight evens out the videos;
+    a low one fills more of the screen.
+    """
+    nodes = []
+
+    def collect(node):
+        if node[0] != "leaf":
+            nodes.append(node)
+            collect(node[2])
+            collect(node[3])
+
+    collect(tree)
+
+    def score(r):
+        return r.coverage - spread_weight * math.log2(max(r.size_spread, 1.0))
+
+    best = _place_tree(tree, aspects, width, height, gap, keep, weights)
+    best_score = score(best)
+    limits = [(max(node[1] * (1 - bound), 0.02), min(node[1] * (1 + bound), 0.98)) for node in nodes]
+    for step in (0.08, 0.04, 0.02, 0.01):
+        for _sweep in range(3):
+            improved = False
+            for node, (lo, hi) in zip(nodes, limits):
+                if time.perf_counter() > deadline or (abort is not None and abort()):
+                    return best
+                for direction in (1, -1):
+                    old = node[1]
+                    node[1] = min(max(old * (1 + direction * step), lo), hi)
+                    if node[1] == old:
+                        continue
+                    r = _place_tree(tree, aspects, width, height, gap, keep, weights)
+                    if score(r) > best_score + 1e-6:
+                        best, best_score, improved = r, score(r), True
+                        break
+                    node[1] = old
+            if not improved:
+                break
+    return best
 
 
 _MEMOS: dict = {}  # search memos by (shapes, crop, slack, cost, big_group), most recent last
@@ -770,7 +839,7 @@ def _memo_for(key) -> dict:
 
 def _place_equal(node, x, y, w, h, gap, pools, aspects, keep, rects):
     if node[0] == "leaf":
-        idx = pools[node[1]].pop(0)
+        idx = node[1] if pools is None else pools[node[1]].pop(0)
         a = aspects[idx]
         shown = w / h
         # Letterbox if the slot is more off-shape than cropping allows.
@@ -803,7 +872,10 @@ BALANCE_MODES = {
     "fill": "Fill first — cover the screen, sizes vary more",
 }
 # How much a 2x size difference is worth in screen coverage, per mode.
-_SPREAD_WEIGHT = {"equal": 0.3, "balanced": 0.12, "fill": 0.03}
+_SPREAD_WEIGHT = {"equal": 0.3, "balanced": 0.06, "fill": 0.03}
+# Split polishing per mode: (spread weight, how far each split may move).
+# Equal evens out the visible sizes; balanced trades some evenness for fill.
+_POLISH = {"equal": (0.5, 0.4), "balanced": (0.06, 0.6)}
 
 
 def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed=0,
@@ -811,9 +883,10 @@ def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed
            abort=None) -> LayoutResult | None:
     """Best puzzle layout for the chosen size balance within ``time_budget``.
 
-    Equal and balanced modes use the equal-area search (exact sizes, or sizes
-    within ±15% per split for balanced); fill mode, and any search that runs
-    out of time, uses the annealing search. The candidate with the best
+    Equal and balanced modes use the equal-area search, then polish its
+    splits on what is visible (evenly for equal, more towards filling the
+    screen for balanced); fill mode, and any search that runs out of time,
+    uses the annealing search. The candidate with the best
     coverage/size-spread trade-off for the mode wins. ``on_progress`` is called
     with each new best candidate, so callers can show it before time runs out.
     Returns None if ``abort()`` became true (the result is no longer wanted).
@@ -832,18 +905,19 @@ def puzzle(aspects, width, height, gap=0.0, max_crop=0.12, balance="equal", seed
 
     candidates = []
     if balance in ("equal", "balanced"):
-        plans = [(_BIG_GROUP, 0.0)]
-        if balance == "balanced":
-            plans.append((_BIG_GROUP, 0.15))
-        if not quick:
-            plans.append((12, 0.0))  # deeper exact search, if time allows
-        for big, slack in plans:
+        # Balanced used to search splits of ±15% as well. That tripled the
+        # search, so it timed out for more than ~16 videos (leaving the equal
+        # result), and when it finished the ±15% compounded over the tree
+        # into 2-2.5x size differences. Now both start from the exact search
+        # and differ in how the splits are polished afterwards.
+        plans = [_BIG_GROUP] if quick else [_BIG_GROUP, 12]  # 12: deeper search if time allows
+        for big in plans:
             left = deadline - time.perf_counter()
             if left <= 0:
                 break
-            r = equal_area_layout(aspects, width, height, gap, max_crop, 1.0 - slack,
+            r = equal_area_layout(aspects, width, height, gap, max_crop, 1.0,
                                   time_budget=left, big_group=big, seed=seed, weights=weights,
-                                  abort=abort)
+                                  abort=abort, polish=_POLISH[balance])
             if aborted():
                 return None
             if r is not None:

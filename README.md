@@ -76,12 +76,24 @@ none.
    *Tile sizes* (Layout menu, Settings, or `B`):
    - **Equal** (default): every video gets the same area. A memoised search
      over slicing trees whose splits follow the video count on each side, so
-     equal areas are built in; it only chooses split directions and which
-     shapes go where. On the 32-video playlist: tiles within 1.12× of each
-     other at 97.4% coverage with 15% crop (1.46× / 88.6% with no crop).
-   - **Balanced**: splits may deviate ±15% when that fills more.
-   - **Fill first**: simulated annealing that maximises coverage (97–100%)
-     but lets sizes vary 2–3×.
+     equal areas are built in; it chooses split directions and which shapes
+     go where. Then each split is nudged so the *visible* sizes match (a
+     letterboxed video shows less than its slot).
+   - **Balanced**: the same layout, with the splits nudged further to fill
+     more of the screen while keeping sizes fairly close.
+   - **Fill first**: simulated annealing that maximises coverage, letting
+     sizes vary 1.5–3×.
+
+   On the 32-video playlist (size spread / screen covered):
+
+   | | Equal | Balanced | Fill first |
+   |---|---|---|---|
+   | No crop | 1.23× / 91.8% | 1.48× / 96.7% | 2.51× / 98.8% |
+   | 15% crop | 1.05× / 98.1% | 1.09× / 98.4% | 1.39× / 98.8% |
+
+   With a little crop allowed, every mode fills the screen and the
+   difference between them is small; without it, they trade evenly between
+   equal sizes and no gaps.
 
    Make the hovered video bigger or smaller with **+ / −** (or Alt+wheel, or
    right-click → Size); the others re-pack around it. **0** resets it. Sizes

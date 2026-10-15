@@ -248,3 +248,23 @@ def test_justified_layouts_stay_fast_with_many_videos():
         assert time.perf_counter() - start < 0.4  # runs on the UI thread (was 0.3-0.5 s)
         assert len(r.rects) == 150 and r.coverage > 0.6
 
+
+
+MIXED_32 = [0.46] + [9 / 16] * 11 + [0.75] + [1.34] * 2 + [16 / 9] * 17  # like a real playlist
+
+
+def test_equal_mode_evens_out_what_is_visible():
+    # Without cropping, equal slots letterbox some videos; polishing the
+    # splits on the visible areas made this 1.29x instead of 1.46x.
+    r = puzzle(MIXED_32, 2233, 1228, gap=2, max_crop=0.0, balance="equal", time_budget=5)
+    assert r.size_spread < 1.35 and r.coverage > 0.9
+
+
+def test_balanced_sits_between_equal_and_fill():
+    # Balanced used to give exactly the equal layout for most playlists.
+    results = {b: puzzle(MIXED_32, 2233, 1228, gap=2, max_crop=0.0, balance=b, time_budget=5)
+               for b in ("equal", "balanced", "fill")}
+    equal, balanced, fill = results["equal"], results["balanced"], results["fill"]
+    assert equal.rects != balanced.rects
+    assert equal.coverage < balanced.coverage <= fill.coverage + 0.01
+    assert equal.size_spread < balanced.size_spread < fill.size_spread
