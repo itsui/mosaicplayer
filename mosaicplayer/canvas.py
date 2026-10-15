@@ -204,6 +204,16 @@ class Canvas(QOpenGLWidget):
 
     # --- layout -------------------------------------------------------------
 
+    @property
+    def layout_seed(self) -> int:
+        """Which of the equally good puzzle arrangements is shown (R changes it)."""
+        return self._seed
+
+    def set_seed(self, seed: int):
+        if seed != self._seed:
+            self._seed = seed
+            self.schedule_relayout()
+
     def schedule_relayout(self, reshuffle=False):
         if reshuffle:
             self._seed += 1

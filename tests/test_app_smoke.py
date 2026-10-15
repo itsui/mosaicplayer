@@ -398,3 +398,50 @@ def test_layout_in_flight_cannot_bring_back_closed_tiles(app, window, clips):
     c._layout_done.emit(generation, (old_tiles, old_result, None))
     pump(app, 0.05)
     assert not c._layout_tiles and c.tile_at(c.rect().center()) is None
+
+
+def test_playlists_keep_their_settings(app, window, clips, tmp_path):
+    import json
+    from mosaicplayer.playlist import Entry, Playlist, write_gpls
+    c, cfg = window.canvas, window.cfg
+    defaults = cfg.playlist_settings()
+    window.load([clips])
+    pump(app, 1.0)
+    # Changed from the menus and keys: this playlist only.
+    window.set_layout_mode("rows")
+    window.set_gap(8)
+    cfg.max_crop = 0.25
+    c.set_all_end_action("next")
+    c.set_seed(3)
+    out = tmp_path / "with-settings.gpls"
+    window._playlist_path = str(out)
+    window.save_playlist()
+    saved = json.loads(next(ln for ln in out.read_text().splitlines() if ln.startswith("#P:"))[3:])
+    assert saved["mosaicplayer"] == {**cfg.playlist_settings(), "seed": 3}
+    assert cfg._defaults == defaults  # the defaults didn't change
+
+    window.close_all()
+    assert cfg.playlist_settings() == defaults and c.layout_seed == 0
+    window.load([str(out)])
+    assert (cfg.layout_mode, cfg.gap, cfg.max_crop, cfg.end_action) == ("rows", 8, 0.25, "next")
+    assert c.layout_seed == 3
+    assert window.mode_actions["rows"].isChecked() and window.crop_action.isChecked()
+    pump(app, 1.0)
+    assert all(t.end_action == "next" for t in c.tiles)
+
+    # A playlist without settings (say, from GridPlayer) opens with the defaults.
+    plain = tmp_path / "plain.gpls"
+    write_gpls(plain, Playlist([Entry(str(next(clips.iterdir())))]))
+    window.close_all()
+    window.load([str(out)])
+    window.close_all()
+    window.load([str(plain)])
+    assert cfg.playlist_settings() == defaults
+
+    # Save as default.
+    window.set_layout_mode("columns")
+    window.save_settings_as_default()
+    assert cfg._defaults["layout_mode"] == "columns" and cfg.is_default()
+    window.set_layout_mode("grid")
+    window.use_default_settings()
+    assert cfg.layout_mode == "columns" and window.mode_actions["columns"].isChecked()

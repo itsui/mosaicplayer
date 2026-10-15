@@ -53,6 +53,10 @@ class SettingsDialog(QDialog):
         self.effort = QDoubleSpinBox(minimum=0.2, maximum=10.0, singleStep=0.5,
                                      value=c.layout_effort, suffix=" s")
         form = QFormLayout()
+        form.addRow(_note("Layout and end-of-video settings are saved in each playlist. "
+                          "What you change here also becomes your default; changes from the "
+                          "menus and keys apply to the current playlist until you choose "
+                          "Settings → Save current settings as default."))
         form.addRow("Packing mode", self.layout_mode)
         form.addRow("Gap between videos", self.gap)
         form.addRow("Allow cropping up to", self.max_crop)

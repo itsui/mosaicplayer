@@ -38,6 +38,13 @@ RANGES = {
 }
 
 
+# Settings that belong to a playlist: saved in it and restored when it is
+# opened. Changing them from the menus or keys affects the current playlist;
+# they become defaults only through "Save current settings as default" (or the
+# settings window).
+PLAYLIST_FIELDS = ("layout_mode", "size_balance", "max_crop", "gap", "fixed_cols", "fixed_rows",
+                   "end_action")
+
 # Settings files from before the rename (GridMosaic): (old, new) QSettings names.
 _RENAMED = ((("gridmosaic", "gridmosaic"), ("mosaicplayer", "mosaicplayer")),
             (("gridmosaic", "window"), ("mosaicplayer", "window")))
@@ -95,6 +102,10 @@ class Config:
     recent_files: list = field(default_factory=list)
     recent_limit: int = 12
 
+    def __post_init__(self):
+        # The saved defaults for the playlist settings (not a dataclass field).
+        self._defaults = self.playlist_settings()
+
     @classmethod
     def load(cls) -> "Config":
         store = QSettings("mosaicplayer", "mosaicplayer")
@@ -102,19 +113,9 @@ class Config:
         for f in fields(cls):
             if not store.contains(f.name):
                 continue
-            default = getattr(cfg, f.name)
-            try:
-                value = _coerce(store.value(f.name), default)
-            except (TypeError, ValueError):
-                continue  # a damaged entry falls back to its default
-            if f.name in CHOICES and value not in CHOICES[f.name]:
-                continue
-            if f.name in RANGES:
-                if value != value:  # NaN
-                    continue
-                lo, hi = RANGES[f.name]
-                value = min(max(value, lo), hi)
-            setattr(cfg, f.name, value)
+            value = _valid(f.name, store.value(f.name), getattr(cfg, f.name))
+            if value is not None:
+                setattr(cfg, f.name, value)
         try:
             version = int(store.value("config_version", 1))
         except (TypeError, ValueError):
@@ -125,19 +126,68 @@ class Config:
                 cfg.max_crop = 0.15
             if abs(cfg.layout_effort - 1.2) < 1e-9:
                 cfg.layout_effort = 2.5
+        cfg._defaults = cfg.playlist_settings()
         return cfg
 
     def save(self) -> None:
+        """Save the settings; playlist settings are saved as their defaults."""
         store = QSettings("mosaicplayer", "mosaicplayer")
         for f in fields(self):
-            store.setValue(f.name, getattr(self, f.name))
+            value = self._defaults.get(f.name, getattr(self, f.name))
+            store.setValue(f.name, value)
         store.setValue("config_version", CONFIG_VERSION)
         store.remove("evenness")  # replaced by size_balance in v2
         store.sync()
 
+    # --- playlist settings ---------------------------------------------------
+
+    def playlist_settings(self) -> dict:
+        return {name: getattr(self, name) for name in PLAYLIST_FIELDS}
+
+    def apply_playlist_settings(self, settings) -> None:
+        """Use the settings saved in a playlist (invalid or unknown ones are skipped)."""
+        if not isinstance(settings, dict):
+            return
+        for name in PLAYLIST_FIELDS:
+            if name in settings:
+                value = _valid(name, settings[name], getattr(self, name))
+                if value is not None:
+                    setattr(self, name, value)
+
+    def use_defaults(self) -> None:
+        for name, value in self._defaults.items():
+            setattr(self, name, value)
+
+    def is_default(self) -> bool:
+        return self.playlist_settings() == self._defaults
+
+    def save_as_default(self, names=PLAYLIST_FIELDS) -> None:
+        for name in names:
+            self._defaults[name] = getattr(self, name)
+        self.save()
+
     def add_recent(self, path: str) -> None:
         recent = [p for p in self.recent_files if p != path]
         self.recent_files = [path, *recent][: self.recent_limit]
+
+
+def _valid(name, raw, default):
+    """``raw`` converted to the type of ``default`` and checked; None if unusable."""
+    if isinstance(default, (int, float)) and not isinstance(default, bool) \
+            and isinstance(raw, bool):
+        return None  # JSON true/false is not a number here
+    try:
+        value = _coerce(raw, default)
+    except (TypeError, ValueError, OverflowError):
+        return None  # a damaged entry falls back to its default
+    if name in CHOICES and value not in CHOICES[name]:
+        return None
+    if name in RANGES:
+        if value != value:  # NaN
+            return None
+        lo, hi = RANGES[name]
+        value = min(max(value, lo), hi)
+    return value
 
 
 def _coerce(raw, default):

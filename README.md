@@ -128,6 +128,24 @@ not fixed-size boxes.
 Right-click anywhere for the full menu (also in fullscreen, where the menu bar
 is hidden).
 
+## Playlists and their settings
+
+Saving a playlist (Ctrl+S) also saves its layout: packing mode, tile sizes,
+crop, gap, fixed grid size, what happens at the end of a video and the
+reshuffle (`R`) arrangement, plus each video's size. Opening it on its own
+brings all of that back; a playlist without them (say, from GridPlayer) opens
+with your defaults, and so does Close all.
+
+Changing these from the menus or keys affects only the current playlist.
+**Settings → Save current settings as default** makes them the defaults for
+new videos and other playlists; **Reset to default settings** goes back.
+Changes made in the settings window become defaults straight away.
+Command-line options win over a playlist's settings for that run.
+
+The settings live in the playlist's `#P:` line under `"mosaicplayer"`.
+GridPlayer opens these playlists normally, but drops that part if it saves
+them again.
+
 ## Settings (Ctrl+,)
 
 - **Layout:** packing mode, gap, max crop, fixed grid size, puzzle tile sizes

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from dataclasses import fields
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
@@ -12,7 +13,7 @@ from PySide6.QtWidgets import (QDialog, QFileDialog, QInputDialog, QLabel, QMain
 
 from . import __version__
 from .canvas import Canvas
-from .config import Config
+from .config import PLAYLIST_FIELDS, Config
 from .layout import BALANCE_MODES, LAYOUT_MODES
 from .playlist import (PLAYLIST_EXTENSIONS, Entry, Playlist, expand_inputs, is_video, local_path,
                        write_gpls)
@@ -41,6 +42,7 @@ HELP = """<h3>MosaicPlayer keys</h3><table cellspacing=4>
 <tr><td><b>Ctrl+,</b></td><td>settings</td><td><b>F1</b>, <b>?</b></td><td>this help</td></tr>
 </table>"""
 
+PLAYLIST_SETTINGS_KEY = "mosaicplayer"  # in the playlist's #P: line (GridPlayer ignores it)
 SPEEDS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0)
 MANY_VIDEOS = 64  # ask before going above this many players
 PLAYLIST_FILTER = "Playlists (*.gpls *.m3u *.m3u8)"
@@ -61,6 +63,7 @@ class MainWindow(QMainWindow):
         self._paused_by_minimize = False
         self._crop_when_on = config.max_crop or 0.15  # what C turns cropping back on to
         self._before_fullscreen = (None, False)  # geometry, was maximized
+        self._syncing_menus = False  # True while menus are updated from the settings
 
         self.canvas = Canvas(config, self)
         self.setCentralWidget(self.canvas)
@@ -214,6 +217,12 @@ class MainWindow(QMainWindow):
 
         m = self.settings_menu = bar.addMenu("&Settings")
         self._act(m, "Settings…", self.open_settings, ["Ctrl+,"])
+        m.addSeparator()
+        self.save_default_action = self._act(m, "Save current settings as default",
+                                             self.save_settings_as_default)
+        self.use_default_action = self._act(m, "Reset to default settings",
+                                            self.use_default_settings)
+        m.aboutToShow.connect(self._update_default_actions)
 
         m = self.help_menu = bar.addMenu("&Help")
         self._act(m, "Keyboard and mouse", self.show_help, ["F1", "?", "Shift+?"])
@@ -301,11 +310,20 @@ class MainWindow(QMainWindow):
         entries = self._confirm_many(entries)
         if not entries:
             return
+        opened_alone = was_empty and len(playlists) == 1 and len(inputs) == 1
         for path in playlists:
             # Ctrl+S saves back to a playlist only when it was opened on its own;
             # after merging it into other videos it would overwrite it with more.
-            self._remember_playlist(path, save_target=was_empty and len(playlists) == 1
-                                    and len(inputs) == 1)
+            self._remember_playlist(path, save_target=opened_alone)
+        if opened_alone:
+            # The playlist's own layout settings, on top of the defaults (a
+            # GridPlayer playlist has none, so it opens with the defaults).
+            saved = self._playlist_params.get(PLAYLIST_SETTINGS_KEY)
+            self.cfg.use_defaults()
+            self.cfg.apply_playlist_settings(saved)
+            seed = saved.get("seed", 0) if isinstance(saved, dict) else 0
+            self.canvas.set_seed(seed if isinstance(seed, int) and not isinstance(seed, bool) else 0)
+            self._settings_changed()
         self.canvas.add_entries(entries)
 
     def _confirm_many(self, entries: list[Entry]) -> list[Entry]:
@@ -389,6 +407,8 @@ class MainWindow(QMainWindow):
             if not path.endswith(".gpls"):
                 path += ".gpls"
         self.canvas.snapshot_positions()
+        self._playlist_params[PLAYLIST_SETTINGS_KEY] = {**self.cfg.playlist_settings(),
+                                                        "seed": self.canvas.layout_seed}
         write_gpls(path, Playlist(self.canvas.entries(), self._playlist_params),
                    save_positions=self.cfg.save_positions, save_paused=self.cfg.save_paused)
         self._remember_playlist(path)
@@ -398,6 +418,10 @@ class MainWindow(QMainWindow):
         self.canvas.clear()
         self._playlist_path = None
         self._playlist_params = {}
+        if not self.cfg.is_default() or self.canvas.layout_seed:
+            self.cfg.use_defaults()  # the closed playlist's settings go with it
+            self.canvas.set_seed(0)
+            self._settings_changed()
 
     # --- drag and drop ------------------------------------------------------
 
@@ -420,24 +444,52 @@ class MainWindow(QMainWindow):
             return
         new = dialog.result_config
         reload = any(getattr(new, f) != getattr(self.cfg, f) for f in RELOAD_FIELDS)
+        # Playlist settings changed in the settings window become the defaults
+        # too; ones left as they were keep their saved defaults.
+        changed = [f for f in PLAYLIST_FIELDS if getattr(new, f) != getattr(self.cfg, f)]
         self._replace_config(new)
+        self.cfg.save_as_default(changed)
         if reload and self.canvas.tiles:
             self.toast("Reloading videos with the new decoder settings…")
             self.canvas.reload_all()
 
     def _replace_config(self, new: Config):
-        for name, value in vars(new).items():
-            setattr(self.cfg, name, value)
+        for f in fields(Config):
+            setattr(self.cfg, f.name, getattr(new, f.name))
         self.cfg.save()
-        self.mode_actions[self.cfg.layout_mode].setChecked(True)
-        self.end_actions[self.cfg.end_action].setChecked(True)
-        self.crop_action.setChecked(self.cfg.max_crop > 0)
-        self.balance_actions[self.cfg.size_balance].setChecked(True)
-        self.title_actions[self.cfg.titles].setChecked(True)
+        self._settings_changed()
+
+    def _settings_changed(self):
+        """Show the current settings in the menus and apply them."""
+        # Checking a menu item runs its action as if clicked (turning crop on
+        # would reset its amount): only update the check marks here.
+        self._syncing_menus = True
+        try:
+            self.mode_actions[self.cfg.layout_mode].setChecked(True)
+            self.end_actions[self.cfg.end_action].setChecked(True)
+            self.crop_action.setChecked(self.cfg.max_crop > 0)
+            self.balance_actions[self.cfg.size_balance].setChecked(True)
+            self.title_actions[self.cfg.titles].setChecked(True)
+        finally:
+            self._syncing_menus = False
         self.canvas.set_all_end_action(self.cfg.end_action)
         self._apply_window_config()
         self.canvas.schedule_relayout()
         self.canvas.update()
+
+    def _update_default_actions(self):
+        differs = not self.cfg.is_default()
+        self.save_default_action.setEnabled(differs)
+        self.use_default_action.setEnabled(differs)
+
+    def save_settings_as_default(self):
+        self.cfg.save_as_default()
+        self.toast("These layout and playback settings are now the default")
+
+    def use_default_settings(self):
+        self.cfg.use_defaults()
+        self._settings_changed()
+        self.toast("Back to the default settings (Ctrl+S saves them in the playlist)")
 
     def _apply_window_config(self):
         self.menuBar().setVisible(self.cfg.show_menubar and not self.isFullScreen())
@@ -457,12 +509,16 @@ class MainWindow(QMainWindow):
         self.top_action.setChecked(self.cfg.stay_on_top)
 
     def set_layout_mode(self, mode: str):
+        if self._syncing_menus:
+            return
         self.cfg.layout_mode = mode
         self.cfg.save()
         self.canvas.schedule_relayout()
         self.toast(LAYOUT_MODES[mode])
 
     def set_balance(self, balance: str):
+        if self._syncing_menus:
+            return
         self.cfg.size_balance = balance
         self.cfg.save()
         self.balance_actions[balance].setChecked(True)
@@ -490,6 +546,8 @@ class MainWindow(QMainWindow):
         self.set_layout_mode("fixed-grid")
 
     def set_crop(self, on: bool):
+        if self._syncing_menus:
+            return
         # Keep a crop amount chosen in Settings when toggling with C.
         if self.cfg.max_crop > 0:
             self._crop_when_on = self.cfg.max_crop
@@ -505,10 +563,14 @@ class MainWindow(QMainWindow):
         self.canvas.schedule_relayout()
 
     def _set_end_action(self, action: str):
+        if self._syncing_menus:
+            return
         self.canvas.set_all_end_action(action)
         self.cfg.save()
 
     def _set_titles(self, mode: str):
+        if self._syncing_menus:
+            return
         self.cfg.titles = mode
         self.cfg.save()
         self.canvas.update()

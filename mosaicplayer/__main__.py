@@ -168,6 +168,12 @@ def main(argv=None):
         win.show()
     if args.inputs:
         win.load(args.inputs)
+        # A playlist's own settings apply on opening; options given on the
+        # command line win over them.
+        if overrides:
+            for name, value in overrides.items():
+                setattr(cfg, name, value)
+            win._settings_changed()
 
     if args.quit_after:
         QTimer.singleShot(int(max(args.quit_after - 10, 1) * 1000), win.canvas.tile_fps)

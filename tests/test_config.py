@@ -74,10 +74,13 @@ def test_command_line_overrides_are_not_saved(isolated_settings):
     cfg.save()
     again = Config.load()
     assert again.layout_mode == "puzzle" and again.gap == 2  # not saved
-    cfg.gap = 6  # changed in the app afterwards: that is saved
-    cfg.save()
+    cfg.gap = 6  # changed in the app afterwards and saved as default
+    cfg.save_as_default(["gap"])
     assert Config.load().gap == 6
     assert Config.load().layout_mode == "puzzle"
+    apply_overrides(cfg, {"decoder_mode": "cpu"})
+    cfg.save()
+    assert Config.load().decoder_mode == "auto"  # a global setting override isn't saved either
 
 
 def test_settings_from_the_old_name_are_imported_once(isolated_settings):
@@ -94,6 +97,34 @@ def test_settings_from_the_old_name_are_imported_once(isolated_settings):
     assert (cfg.max_crop, cfg.gap) == (0.0, 6)
     assert QSettings("mosaicplayer", "window").value("last_dir") == "/videos"
     cfg.gap = 8
-    cfg.save()
+    cfg.save_as_default()
     import_old_settings()  # already has settings: not overwritten again
     assert Config.load().gap == 8
+
+
+def test_playlist_settings_stay_out_of_the_defaults(isolated_settings):
+    QSettings("mosaicplayer", "mosaicplayer").clear()
+    cfg = Config.load()
+    cfg.layout_mode, cfg.gap, cfg.titles = "rows", 10, "always"  # from the menus
+    assert not cfg.is_default()
+    cfg.save()
+    saved = Config.load()
+    assert (saved.layout_mode, saved.gap) == ("puzzle", 2)  # playlist settings: not saved
+    assert saved.titles == "always"  # global settings are saved as before
+    cfg.use_defaults()
+    assert (cfg.layout_mode, cfg.gap) == ("puzzle", 2) and cfg.is_default()
+    cfg.layout_mode = "grid"
+    cfg.save_as_default()
+    assert Config.load().layout_mode == "grid"
+
+
+def test_settings_from_a_playlist_are_checked():
+    cfg = Config()
+    cfg.apply_playlist_settings({"layout_mode": "columns", "gap": 999, "max_crop": "nan",
+                                 "size_balance": "wobbly", "fixed_cols": True,
+                                 "end_action": "next", "decoder_mode": "cpu"})
+    assert cfg.layout_mode == "columns" and cfg.end_action == "next"
+    assert cfg.gap == 40  # clamped
+    assert cfg.max_crop == 0.15 and cfg.size_balance == "equal" and cfg.fixed_cols == 0
+    assert cfg.decoder_mode == "auto"  # not a playlist setting
+    cfg.apply_playlist_settings("not a dict")
