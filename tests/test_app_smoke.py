@@ -293,6 +293,7 @@ def test_many_videos_asks_first(app, window, clips, monkeypatch):
 
 
 def test_settings_dialog_round_trip(app, window):
+    from dataclasses import replace
     from gridmosaic.settings_dialog import SettingsDialog
     dialog = SettingsDialog(window.cfg, window)
     dialog.gap.setValue(6)
@@ -300,8 +301,11 @@ def test_settings_dialog_round_trip(app, window):
     dialog._accept()
     assert dialog.result_config.gap == 6
     assert dialog.result_config.layout_mode == "columns"
-    window._replace_config(dialog.result_config)
+    window._replace_config(replace(dialog.result_config, titles="always"))
     assert window.cfg.layout_mode == "columns"
+    # Menus show the new values.
+    assert window.mode_actions["columns"].isChecked()
+    assert window.title_actions["always"].isChecked()
 
 
 def test_crop_toggle_keeps_custom_amount(app, window):

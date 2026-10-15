@@ -204,10 +204,12 @@ class MainWindow(QMainWindow):
         self._act(m, "Stats overlay", self.set_hud, ["H"], checkable=True)
         titles = m.addMenu("Titles")
         group = QActionGroup(self)
+        self.title_actions = {}
         for key, label in (("hover", "On hover"), ("always", "Always"), ("never", "Never")):
             act = self._act(titles, label, lambda on, k=key: on and self._set_titles(k),
                             checkable=True, checked=self.cfg.titles == key)
             group.addAction(act)
+            self.title_actions[key] = act
         self._act(None, "Leave", self.escape, ["Esc"])
 
         m = self.settings_menu = bar.addMenu("&Settings")
@@ -429,6 +431,7 @@ class MainWindow(QMainWindow):
         self.end_actions[self.cfg.end_action].setChecked(True)
         self.crop_action.setChecked(self.cfg.max_crop > 0)
         self.balance_actions[self.cfg.size_balance].setChecked(True)
+        self.title_actions[self.cfg.titles].setChecked(True)
         self.canvas.set_all_end_action(self.cfg.end_action)
         self._apply_window_config()
         self.canvas.schedule_relayout()
