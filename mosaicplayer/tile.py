@@ -404,7 +404,9 @@ class Tile(QObject):
     def seek_random(self):
         duration = self.player.duration
         if duration and math.isfinite(duration) and duration > 0:
-            self.seek_to(random.uniform(0, duration * 0.9))
+            # Exact: a keyframe seek snaps to the nearest keyframe, often seconds
+            # apart, so similar videos all landed on the same few spots.
+            self.seek_to(random.uniform(0, duration * 0.9), exact=True)
 
     @_while_open
     def zoom_at(self, steps: float, fx: float, fy: float):

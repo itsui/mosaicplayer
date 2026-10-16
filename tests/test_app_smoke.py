@@ -450,3 +450,21 @@ def test_playlists_keep_their_settings(app, window, clips, tmp_path):
     window.set_layout_mode("grid")
     window.use_default_settings()
     assert cfg.layout_mode == "columns" and window.mode_actions["columns"].isChecked()
+
+
+def test_random_positions_are_not_snapped_to_keyframes(app, window, tmp_path):
+    # One keyframe in the whole clip: keyframe seeks would all land on 0.
+    clip = tmp_path / "one_keyframe.mp4"
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "testsrc2=size=320x180:rate=25:duration=8", "-c:v", "libx264", "-g", "1000",
+                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(clip)], check=True)
+    c = window.canvas
+    window.load([str(clip)] * 4)
+    pump(app, 2.0)
+    c.set_all_paused(True)
+    for tile in c.tiles:
+        tile.seek_random()
+    pump(app, 1.0)
+    positions = [tile.progress()[0] for tile in c.tiles]
+    assert len({round(p, 1) for p in positions}) >= 3, positions
+    assert max(positions) > 1.0
