@@ -1,9 +1,12 @@
 # MosaicPlayer
 
-Play many videos at once, packed like a puzzle to fill the screen. A rebuild of
-[GridPlayer](https://github.com/vzhd1701/gridplayer) that fixes its two main
-problems: stuttering with many videos, and hand-picking rows and columns for
-a mix of portrait and landscape videos. Reads and writes GridPlayer `.gpls`
+Play many videos at once, packed like a puzzle to fill the screen.
+
+Inspired by [GridPlayer](https://github.com/vzhd1701/gridplayer), MosaicPlayer
+plays far more videos smoothly: 60+ at once, including 4K and 60 fps, on a
+single OpenGL canvas with GPU decoding where it helps. And no more picking rows
+and columns: portrait and landscape videos are packed automatically, filling
+the screen with videos of similar size. It opens and saves GridPlayer `.gpls`
 playlists.
 
 ## Install
@@ -239,7 +242,7 @@ and ffmpeg) and keep their settings in a temporary folder.
 ## License
 
 GPL-3.0-or-later (see [LICENSE](LICENSE)). MosaicPlayer is an independent
-rebuild inspired by [GridPlayer](https://github.com/vzhd1701/gridplayer)
+project inspired by [GridPlayer](https://github.com/vzhd1701/gridplayer)
 (also GPL-3.0) and uses [mpv](https://mpv.io) and Qt (PySide6).
 
 ## Building the downloads
