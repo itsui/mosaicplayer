@@ -50,7 +50,9 @@ jobs:
           iscc /DAppVersion=$env:VERSION packaging\windows\mosaicplayer.iss
       - name: Portable zip
         shell: pwsh
-        run: Compress-Archive -Path dist\MosaicPlayer -DestinationPath "dist\MosaicPlayer-$env:VERSION-windows-portable.zip"
+        run: |
+          Copy-Item LICENSE, THIRD-PARTY-NOTICES.md dist\MosaicPlayer\
+          Compress-Archive -Path dist\MosaicPlayer -DestinationPath "dist\MosaicPlayer-$env:VERSION-windows-portable.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: windows

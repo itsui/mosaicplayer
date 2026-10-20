@@ -19,7 +19,10 @@ a = Analysis(
     [os.path.join(SPECPATH, "launch.py")],
     pathex=[root],
     binaries=[(libmpv, ".")],
-    datas=[(os.path.join(root, "mosaicplayer", "icons"), os.path.join("mosaicplayer", "icons"))],
+    datas=[(os.path.join(root, "mosaicplayer", "icons"), os.path.join("mosaicplayer", "icons")),
+           # The licenses travel with every download.
+           (os.path.join(root, "LICENSE"), "."),
+           (os.path.join(root, "THIRD-PARTY-NOTICES.md"), ".")],
     excludes=["tkinter", "PySide6.QtTest", "PySide6.QtWebEngineCore", "PySide6.QtQml",
               "PySide6.QtQuick", "PySide6.QtPdf", "PySide6.QtMultimedia", "pytest"],
 )
