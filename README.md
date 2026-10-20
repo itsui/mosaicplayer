@@ -50,12 +50,17 @@ or at 60 fps.
 - **reference and practice** videos (dance, sports, music) playing together
 - background visuals for parties, streams or shop windows
 
-## Any number of videos
+## Smooth with 5 videos or 50
 
-| A few | A bunch | Lots |
-|---|---|---|
-| ![5 videos filling the screen](docs/screenshot-5-videos.jpg) | ![15 videos in a mosaic](docs/screenshot-15-videos.jpg) | ![48 videos at once in a video wall](docs/screenshot-48-videos.jpg) |
-| 5 videos | 15 videos | 48 videos |
+| | |
+|---|---|
+| ![5 videos playing at once, filling the screen](docs/screenshot-5-videos.jpg) | ![15 portrait and landscape videos in a video mosaic](docs/screenshot-15-videos.jpg) |
+| **5 videos:** every video at its full 24 fps, screen redrawn 60 times a second | **15 videos:** full 24 fps each, 60 redraws a second |
+| ![48 videos at once in a video wall](docs/screenshot-48-videos.jpg) | ![120 videos at the same time, just for fun](docs/screenshot-120-videos.jpg) |
+| **48 videos:** still full 24 fps each, 60 redraws a second | **120 videos, just for fun:** it still plays (about 22 of 24 fps each), but the screen redraws less often, so this is past the comfortable limit |
+
+Measured on an Intel Core i9-12900KF with an RTX 3090, using 480p–720p clips at
+24 fps. Up to about 60 videos stay perfectly smooth on a PC like this.
 
 ## Download and install
 
