@@ -8,7 +8,6 @@ description: >-
 url: "https://itsui.github.io"
 baseurl: "/mosaicplayer"
 logo: /mosaicplayer/icons/mosaicplayer-256.png
-image: /docs/screenshot-15-videos.jpg
 lang: en
 author: itsui
 theme: jekyll-theme-primer
@@ -22,3 +21,8 @@ exclude:
   - pyproject.toml
   - requirements.txt
   - CHANGELOG.md
+defaults:
+  - scope:
+      path: ""
+    values:
+      image: /docs/screenshot-15-videos.jpg  # preview when the link is shared
