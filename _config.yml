@@ -1,11 +1,13 @@
 # GitHub Pages: the README becomes https://itsui.github.io/mosaicplayer/
-title: "MosaicPlayer: play multiple videos at the same time"
+title: MosaicPlayer
+tagline: "Play multiple videos at the same time (Windows, Linux)"
 description: >-
   Free multi video player for Windows and Linux. Play dozens of videos at once
   in a video wall that fills the screen, portrait and landscape mixed.
   A fast GridPlayer alternative.
 url: "https://itsui.github.io"
 baseurl: "/mosaicplayer"
+logo: /mosaicplayer/icons/mosaicplayer-256.png
 image: /docs/screenshot-15-videos.jpg
 lang: en
 author: itsui
