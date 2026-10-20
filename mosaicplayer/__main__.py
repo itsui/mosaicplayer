@@ -106,6 +106,8 @@ def main(argv=None):
     parser.add_argument("--no-save-config", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
+    # QStandardPaths (for the log folder) needs the app name, set below; log
+    # to the terminal until then.
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.WARNING)
 
     fmt = QSurfaceFormat()
@@ -128,6 +130,9 @@ def main(argv=None):
         icon.addFile(str(png))
     app.setWindowIcon(icon)
     locale.setlocale(locale.LC_NUMERIC, "C")  # libmpv requires this; Qt resets it
+    from .support import setup_logging
+    logging.getLogger().handlers.clear()
+    setup_logging(args.debug)
 
     from .config import Config, import_old_settings  # after QApplication
     from ._bundle import use_bundled_libmpv

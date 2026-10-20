@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import random
+import threading
 from dataclasses import fields
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtCore import QEvent, QSettings, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QActionGroup, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (QDialog, QFileDialog, QInputDialog, QLabel, QMainWindow,
                                QMenu, QMessageBox, QVBoxLayout)
 
@@ -18,6 +19,7 @@ from .layout import BALANCE_MODES, LAYOUT_MODES
 from .playlist import (PLAYLIST_EXTENSIONS, Entry, Playlist, expand_inputs, is_video, local_path,
                        write_gpls)
 from .settings_dialog import RELOAD_FIELDS, SettingsDialog
+from .support import latest_release, log_dir
 from .options import END_ACTIONS
 
 HELP = """<h3>MosaicPlayer keys</h3><table cellspacing=4>
@@ -51,8 +53,11 @@ VIDEO_FILTER = ("Videos and playlists (*.mp4 *.mkv *.webm *.mov *.avi *.m4v *.wm
 
 
 class MainWindow(QMainWindow):
+    _update_result = Signal(object)  # update check thread -> UI thread
+
     def __init__(self, config: Config):
         super().__init__()
+        self._update_result.connect(self._show_update_result)
         self.cfg = config
         self.setWindowTitle("MosaicPlayer")
         self.resize(1600, 900)
@@ -228,6 +233,8 @@ class MainWindow(QMainWindow):
 
         m = self.help_menu = bar.addMenu("&Help")
         self._act(m, "Keyboard and mouse", self.show_help, ["F1", "?", "Shift+?"])
+        self._act(m, "Check for updates…", self.check_for_updates)
+        self._act(m, "Open log folder", self.open_log_folder)
         self._act(m, "About MosaicPlayer", self.show_about)
 
     def _fill_recent(self):
@@ -618,6 +625,42 @@ class MainWindow(QMainWindow):
 
     def show_help(self):
         QMessageBox.information(self, "Keyboard and mouse", HELP)
+
+    def check_for_updates(self):
+        """Ask GitHub for the latest release (only when chosen; never automatic)."""
+        self.toast("Checking for updates…")
+
+        def check():
+            try:
+                newer = latest_release()
+                result = ("newer", newer) if newer else ("current", None)
+            except (OSError, ValueError) as e:
+                result = ("error", str(e))
+            self._update_result.emit(result)
+
+        threading.Thread(target=check, daemon=True).start()
+
+    def _show_update_result(self, result):
+        kind, info = result
+        if kind == "newer":
+            version, url = info
+            box = QMessageBox(self)
+            box.setWindowTitle("Update available")
+            box.setText(f"MosaicPlayer {version} is available (you have {__version__}).")
+            download = box.addButton("Open download page", QMessageBox.AcceptRole)
+            box.addButton(QMessageBox.Close)
+            box.exec()
+            if box.clickedButton() is download:
+                QDesktopServices.openUrl(QUrl(url))
+        elif kind == "current":
+            self.toast(f"MosaicPlayer {__version__} is the latest version")
+        else:
+            self.toast(f"Could not check for updates: {info}", 6000)
+
+    def open_log_folder(self):
+        folder = log_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def show_about(self):
         QMessageBox.about(
