@@ -1,0 +1,29 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: System libraries (libmpv, ffmpeg, Qt's X11 deps, a virtual display)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libmpv2 ffmpeg xvfb \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0
+      - run: pip install -e ".[dev]"
+      - run: python -m pyflakes mosaicplayer tests
+      - name: Layout, playlist and settings tests
+        run: python -m pytest -q tests/test_layout.py tests/test_playlist.py tests/test_config.py
+      - name: End-to-end tests (real window on a virtual display)
+        # Software OpenGL on a virtual display can be slow or flaky: report, don't block.
+        continue-on-error: true
+        run: xvfb-run -a python -m pytest -q tests/test_app_smoke.py

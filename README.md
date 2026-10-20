@@ -6,18 +6,41 @@ problems: stuttering with many videos, and hand-picking rows and columns for
 a mix of portrait and landscape videos. Reads and writes GridPlayer `.gpls`
 playlists.
 
+## Install
+
+**Windows 10/11 (64-bit):** download `MosaicPlayer-…-windows-setup.exe` from
+[Releases](https://github.com/itsui/mosaicplayer/releases) and run it. It adds
+a Start menu entry, "Open with MosaicPlayer" for videos and folders, and can
+open `.gpls` playlists by double-click. Prefer no installer? Use the
+`windows-portable.zip` and run `MosaicPlayer.exe`. Windows may warn about an
+unknown publisher the first time (the app isn't code-signed): *More info →
+Run anyway*.
+
+**Linux (x86-64):** download `MosaicPlayer-…-x86_64.AppImage`, make it
+executable and run it:
+
 ```bash
+chmod +x MosaicPlayer-*-x86_64.AppImage
+./MosaicPlayer-*-x86_64.AppImage
+```
+
+It includes mpv and Qt and needs a distro from 2024 or newer (Ubuntu 24.04,
+Linux Mint 22, Fedora 40, Debian 13 …). If it says FUSE is missing, install
+`libfuse2` (`sudo apt install libfuse2t64` on Ubuntu 24.04).
+
+**From source** (any distro, needs Python 3.11+ and libmpv: `libmpv2` on
+Debian/Ubuntu/Mint, `mpv-libs` on Fedora):
+
+```bash
+git clone https://github.com/itsui/mosaicplayer && cd mosaicplayer
 ./mosaicplayer.sh --setup       # once: creates ~/.venvs/mosaicplayer
 ./mosaicplayer.sh --install     # adds MosaicPlayer (with its icon) to the applications menu
 ./mosaicplayer.sh wall.gpls     # or videos, folders, .m3u
 ```
 
-Needs libmpv (`libmpv2` on Debian/Ubuntu/Mint) and Python 3.11+.
-
-The menu entry (under Sound & Video) runs this checkout, so changes to the
-code show up the next time you start it. `--uninstall` removes the entry; your
-settings stay. Formerly *GridMosaic*: settings from that name are imported on
-the first start.
+The menu entry runs the checkout, so changes to the code show up the next
+time you start it. `--uninstall` removes the entry; your settings stay. Or
+`pip install .` for a `mosaicplayer` command.
 
 Command-line options apply to that run only (your saved settings stay as they
 were, unless you change the same setting in the app):
@@ -218,3 +241,12 @@ and ffmpeg) and keep their settings in a temporary folder.
 GPL-3.0-or-later (see [LICENSE](LICENSE)). MosaicPlayer is an independent
 rebuild inspired by [GridPlayer](https://github.com/vzhd1701/gridplayer)
 (also GPL-3.0) and uses [mpv](https://mpv.io) and Qt (PySide6).
+
+## Building the downloads
+
+Push a version tag (`git tag v0.3.0 && git push origin v0.3.0`): GitHub
+Actions builds the Windows installer, the portable zip and the AppImage, and
+attaches them to a draft release to check before publishing. Locally:
+`packaging/linux/build-appimage.sh` on Linux; on Windows see
+`.github/workflows/release.yml` (PyInstaller + Inno Setup, with libmpv from
+[shinchiro's mpv builds](https://github.com/shinchiro/mpv-winbuild-cmake)).

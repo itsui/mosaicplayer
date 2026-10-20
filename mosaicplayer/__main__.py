@@ -130,15 +130,23 @@ def main(argv=None):
     locale.setlocale(locale.LC_NUMERIC, "C")  # libmpv requires this; Qt resets it
 
     from .config import Config, import_old_settings  # after QApplication
+    from ._bundle import use_bundled_libmpv
+    use_bundled_libmpv()
     try:
         from .window import MainWindow  # loads libmpv
     except OSError as e:
         if "mpv" not in str(e).lower():
             raise
-        print("MosaicPlayer needs the mpv library (libmpv), which wasn't found.\n"
-              "Install it, e.g. 'sudo apt install libmpv2' (Debian/Ubuntu/Mint) or\n"
-              "'sudo dnf install mpv-libs' (Fedora), then start MosaicPlayer again.",
-              file=sys.stderr)
+        if sys.platform == "win32":
+            hint = "Put libmpv-2.dll (from an mpv 'dev' build) next to MosaicPlayer."
+        else:
+            hint = ("Install it, e.g. 'sudo apt install libmpv2' (Debian/Ubuntu/Mint) or\n"
+                    "'sudo dnf install mpv-libs' (Fedora).")
+        message = f"MosaicPlayer needs the mpv library (libmpv), which wasn't found.\n{hint}"
+        print(message, file=sys.stderr)
+        if getattr(sys, "frozen", False):  # no terminal to read it in
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(None, "MosaicPlayer", message)
         return 1
 
     import_old_settings()

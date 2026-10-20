@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=MosaicPlayer
+GenericName=Multi-video player
+Comment=Play many videos at once, packed like a puzzle to fill the screen
+Exec=MosaicPlayer %F
+Icon=mosaicplayer
+Terminal=false
+StartupWMClass=MosaicPlayer
+Categories=AudioVideo;Video;Player;
+Keywords=video;grid;mosaic;wall;multi;gridplayer;
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/x-msvideo;video/x-flv;video/mpeg;video/mp2t;

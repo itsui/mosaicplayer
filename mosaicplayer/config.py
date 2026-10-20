@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field, fields
 
 from PySide6.QtCore import QSettings
@@ -16,7 +17,7 @@ CHOICES = {
     "size_balance": {"equal", "balanced", "fill"},
     "end_action": {"loop", "next", "random", "stop"},
     "decoder_mode": {"auto", "gpu-copy", "gpu-zero-copy", "cpu"},
-    "hwdec_api": {"nvdec", "vaapi", "vulkan"},
+    "hwdec_api": {"nvdec", "vaapi", "vulkan", "d3d11va"},
     "scaling": {"balanced", "quality", "fast"},
     "titles": {"hover", "always", "never"},
 }
@@ -81,7 +82,8 @@ class Config:
 
     # Decoding
     decoder_mode: str = AUTO
-    hwdec_api: str = "nvdec"
+    # D3D11 works with any GPU on Windows; elsewhere NVDEC suits NVIDIA cards.
+    hwdec_api: str = "d3d11va" if sys.platform == "win32" else "nvdec"
     gpu_budget_mpx: float = 1200.0
     max_gpu_tiles: int = 24
     auto_threshold_mpx: float = 70.0

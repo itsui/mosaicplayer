@@ -84,8 +84,9 @@ class SettingsDialog(QDialog):
 
         # Decoding
         self.decoder_mode = _combo(DECODER_MODES, c.decoder_mode)
-        self.hwdec_api = _combo({"nvdec": "NVIDIA (NVDEC)", "vaapi": "VA-API (Intel/AMD)",
-                                 "vulkan": "Vulkan video"}, c.hwdec_api)
+        apis = {"nvdec": "NVIDIA (NVDEC)", "vaapi": "VA-API (Intel/AMD on Linux)",
+                "vulkan": "Vulkan video", "d3d11va": "Direct3D 11 (any GPU on Windows)"}
+        self.hwdec_api = _combo(apis, c.hwdec_api)
         self.budget = QSpinBox(minimum=50, maximum=20000, singleStep=100,
                                value=int(c.gpu_budget_mpx), suffix=" Mpx/s")
         self.max_gpu = QSpinBox(minimum=0, maximum=200, value=c.max_gpu_tiles)
