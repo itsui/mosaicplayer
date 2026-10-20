@@ -9,7 +9,7 @@ playlists.
 ```bash
 ./mosaicplayer.sh --setup       # once: creates ~/.venvs/mosaicplayer
 ./mosaicplayer.sh --install     # adds MosaicPlayer (with its icon) to the applications menu
-./mosaicplayer.sh ~/test.gpls   # or videos, folders, .m3u
+./mosaicplayer.sh wall.gpls     # or videos, folders, .m3u
 ```
 
 Needs libmpv (`libmpv2` on Debian/Ubuntu/Mint) and Python 3.11+.
@@ -38,9 +38,9 @@ were, unless you change the same setting in the app):
 | Loop | seek back 500 ms before the end | mpv's seamless `loop-file` |
 | Missing files | dropped silently (only in the log) | skipped with a message; broken files show an error tile |
 
-### Measured on this machine (RTX 3090, 24 threads, 2× 4K screens)
+### Measured (RTX 3090, 24 threads, 2× 4K screens)
 
-Your 32-video `test.gpls` (h264, 480p–1080p):
+A 32-video playlist (h264, 480p–1080p, portrait and landscape):
 
 | | GridPlayer `vlc_hw` | GridPlayer `vlc_sw` | MosaicPlayer (auto) |
 |---|---|---|---|
@@ -48,7 +48,7 @@ Your 32-video `test.gpls` (h264, 480p–1080p):
 | CPU | ~1 core | ~6.5 cores | ~2.8 cores |
 | RAM | 3.4 GB | ~3 GB | 1.2 GB |
 | VRAM | — | — | 0 MB |
-| Screen covered | 63% (your 4-row setting) | 63% | 97% |
+| Screen covered | 63% (4 rows set by hand) | 63% | 97% |
 
 Stress test, 60× 720p + 4× 4K: 60 redraws/s, 29.6 of 30 fps per tile.
 
@@ -212,3 +212,9 @@ tests/                layout, playlist, config and end-to-end tests (pytest)
 Run the tests with `~/.venvs/mosaicplayer/bin/python -m pytest tests/`. The
 end-to-end tests open a small window with generated clips (they need a display
 and ffmpeg) and keep their settings in a temporary folder.
+
+## License
+
+GPL-3.0-or-later (see [LICENSE](LICENSE)). MosaicPlayer is an independent
+rebuild inspired by [GridPlayer](https://github.com/vzhd1701/gridplayer)
+(also GPL-3.0) and uses [mpv](https://mpv.io) and Qt (PySide6).
