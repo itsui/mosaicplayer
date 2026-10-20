@@ -274,7 +274,10 @@ class Tile(QObject):
         self._dirty = True
         worker = self.worker
         if worker is not None:
-            worker.wake()
+            worker.mark(self)
+
+    def needs_render(self) -> bool:
+        return self._dirty
 
     def request_size(self, width: int, height: int):
         """Called by the window when the layout changes the tile's size."""
@@ -282,7 +285,7 @@ class Tile(QObject):
             self.target.size = (width, height)
             self._dirty = True
             if self.worker is not None:
-                self.worker.wake()
+                self.worker.mark(self)
 
     def render_into_back(self) -> bool | None:
         """Render a new frame into the back buffer.

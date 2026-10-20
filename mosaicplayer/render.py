@@ -158,6 +158,11 @@ class RenderWorker(QThread):
         self.tiles: list = []
         self._tiles_lock = threading.Lock()
         self._wake = threading.Event()
+        # Tiles with something to render (a new frame, a resize). Visiting only
+        # those, not every tile each time any one has a frame, kept 120 videos
+        # from spinning the workers (43,000 visits/s) and starving the window.
+        self._pending: set = set()
+        self._pending_lock = threading.Lock()
         self._calls: queue.Queue = queue.Queue()
         self._running = True
 
@@ -168,7 +173,7 @@ class RenderWorker(QThread):
         self.call(tile.init_gl, wait=False)
         with self._tiles_lock:
             self.tiles.append(tile)
-        self.wake()
+        self.mark(tile)
 
     def remove(self, tile):
         with self._tiles_lock:
@@ -178,6 +183,12 @@ class RenderWorker(QThread):
         tile.worker = None
 
     def wake(self):
+        self._wake.set()
+
+    def mark(self, tile):
+        """Any thread: ``tile`` has something to render."""
+        with self._pending_lock:
+            self._pending.add(tile)
         self._wake.set()
 
     def call(self, fn, wait=True, timeout=5.0):
@@ -203,17 +214,19 @@ class RenderWorker(QThread):
             self._wake.wait(0.1)
             self._wake.clear()
             self._run_calls()
+            with self._pending_lock:
+                pending, self._pending = self._pending, set()
             with self._tiles_lock:
-                tiles = list(self.tiles)
+                tiles = [t for t in self.tiles if t in pending]
             rendered = []
-            deferred = False
+            deferred = []
             for tile in tiles:
                 try:
                     drew = tile.render_into_back()
                     if drew:
                         rendered.append(tile)
                     elif drew is None:
-                        deferred = True  # the window was drawing from it
+                        deferred.append(tile)  # the window was drawing from it
                 except Exception:  # keep the worker alive whatever one tile does
                     log.exception("rendering %s failed", tile.title)
             if rendered:
@@ -224,11 +237,15 @@ class RenderWorker(QThread):
                 f.glFlush()  # other contexts can only wait for a flushed fence
                 for tile in rendered:
                     tile.swap_buffers(fence)
+                    if tile.needs_render():
+                        deferred.append(tile)  # e.g. the other buffer after a resize
                 fence.acquire()
                 fence.release()  # the batch's own reference: deleted once all are done
                 self.pool.notify()
             if deferred:
                 time.sleep(0.001)  # the window is mid-frame; try those tiles again
+                with self._pending_lock:
+                    self._pending.update(deferred)
                 self._wake.set()
         self._run_calls()
         with self._tiles_lock:
