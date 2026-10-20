@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
         self._crop_when_on = config.max_crop or 0.15  # what C turns cropping back on to
         self._before_fullscreen = (None, False)  # geometry, was maximized
         self._syncing_menus = False  # True while menus are updated from the settings
+        self.confirm_many = True  # ask before adding more than MANY_VIDEOS
 
         self.canvas = Canvas(config, self)
         self.setCentralWidget(self.canvas)
@@ -338,7 +339,7 @@ class MainWindow(QMainWindow):
     def _confirm_many(self, entries: list[Entry]) -> list[Entry]:
         """Ask before starting a very large number of players at once."""
         total = len(entries) + len(self.canvas.tiles)
-        if total <= MANY_VIDEOS:
+        if total <= MANY_VIDEOS or not self.confirm_many:
             return entries
         box = QMessageBox(self)
         box.setWindowTitle("Add videos")

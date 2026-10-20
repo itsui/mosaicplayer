@@ -104,6 +104,7 @@ def main(argv=None):
     parser.add_argument("--screenshot", metavar="PNG", help=argparse.SUPPRESS)
     parser.add_argument("--quit-after", type=float, metavar="SECONDS", help=argparse.SUPPRESS)
     parser.add_argument("--no-save-config", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-confirm", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     # QStandardPaths (for the log folder) needs the app name, set below; log
@@ -172,6 +173,7 @@ def main(argv=None):
         cfg.save = lambda: None
 
     win = MainWindow(cfg)
+    win.confirm_many = not args.no_confirm
     close_on_signals(app, win)
     # However the app quits, stop the players and render threads first.
     app.aboutToQuit.connect(win.canvas.shutdown)
