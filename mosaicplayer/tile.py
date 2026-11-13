@@ -386,6 +386,9 @@ class Tile(QObject):
     def seek(self, seconds: float):
         self._seek(seconds, "relative", "keyframes")
 
+    def seek_exact(self, seconds: float):
+        self._seek(seconds, "relative", "exact")
+
     @_while_open
     def seek_to(self, seconds: float, exact=False):
         """Seek to a time. Keyframe seeks are fast; ``exact`` lands on the frame."""
@@ -402,6 +405,22 @@ class Tile(QObject):
             self.player.seek(amount, reference, precision)
         except (SystemError, ValueError) as e:  # mpv refused (mid-load, odd file)
             log.warning("seek %s %s failed for %s: %s", amount, reference, self.title, e)
+
+    @_while_open
+    def frame_step(self):
+        """Advance by one frame."""
+        try:
+            self.player.command("frame-step")
+        except (SystemError, ValueError) as e:
+            log.warning("frame-step failed for %s: %s", self.title, e)
+
+    @_while_open
+    def frame_back_step(self):
+        """Go back by one frame."""
+        try:
+            self.player.command("frame-back-step")
+        except (SystemError, ValueError) as e:
+            log.warning("frame-back-step failed for %s: %s", self.title, e)
 
     @_while_open
     def seek_random(self):
