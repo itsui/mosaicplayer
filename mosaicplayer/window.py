@@ -23,18 +23,18 @@ from .support import latest_release, log_dir
 from .options import END_ACTIONS
 
 HELP = """<h3>MosaicPlayer keys</h3><table cellspacing=4>
-<tr><td><b>Space</b></td><td>pause / play all</td><td><b>Click</b></td><td>pause one</td></tr>
-<tr><td><b>M</b></td><td>mute / unmute all</td><td><b>Middle-click</b></td><td>mute / unmute one</td></tr>
-<tr><td><b>Wheel</b></td><td>seek ±5 s (Shift ±30 s)</td><td><b>← →</b></td><td>seek hovered video</td></tr>
-<tr><td><b>Ctrl+wheel</b></td><td>zoom into the hovered video</td><td><b>Z</b></td><td>reset zoom</td></tr>
+<tr><td><b>Space</b></td><td>pause / play (hovered or all)</td><td><b>Click</b></td><td>pause one</td></tr>
+<tr><td><b>M</b></td><td>mute / unmute (hovered or all)</td><td><b>Middle-click</b></td><td>mute / unmute one</td></tr>
+<tr><td><b>Wheel</b></td><td>seek ±1 s (Shift ±30 s, hovered or all)</td><td><b>Ctrl+wheel</b></td><td>zoom into hovered</td></tr>
+<tr><td><b>← →</b></td><td>seek ±5 s (hovered or all)</td><td><b>, .</b></td><td>frame back / step (hovered or all)</td></tr>
+<tr><td><b>Home</b>, <b>Ctrl+R</b></td><td>restart all</td><td><b>S</b></td><td>random positions for all</td></tr>
+<tr><td><b>Z</b></td><td>reset zoom</td><td><b>Del</b></td><td>remove hovered</td></tr>
 <tr><td><b>Double-click</b>, <b>Enter</b></td><td>focus one video</td><td><b>Esc</b></td><td>show all / leave fullscreen</td></tr>
-<tr><td><b>Drag</b> a video</td><td>swap it with another</td><td><b>Del</b></td><td>remove hovered video</td></tr>
-<tr><td><b>1</b>–<b>5</b></td><td>puzzle, rows, columns, grid, fixed grid</td><td><b>R</b></td><td>reshuffle puzzle</td></tr>
-<tr><td><b>C</b></td><td>allow cropping on / off</td><td><b>[ ]</b></td><td>gap smaller / bigger</td></tr>
-<tr><td><b>B</b></td><td>puzzle tile sizes: equal / balanced / fill</td><td></td><td></td></tr>
+<tr><td><b>Drag</b> a video</td><td>swap it with another</td><td><b>R</b></td><td>reshuffle puzzle</td></tr>
+<tr><td><b>1</b>–<b>5</b></td><td>puzzle, rows, columns, grid, fixed grid</td><td><b>C</b></td><td>allow cropping on / off</td></tr>
+<tr><td><b>[ ]</b></td><td>gap smaller / bigger</td><td><b>B</b></td><td>puzzle tile sizes: equal / balanced / fill</td></tr>
 <tr><td><b>+ / −</b>, <b>Alt+wheel</b></td><td>make hovered video bigger / smaller</td><td><b>0</b></td><td>normal size</td></tr>
-<tr><td><b>N</b></td><td>random video from the same folder</td><td><b>S</b></td><td>random positions for all</td></tr>
-<tr><td><b>Y</b></td><td>sync all to hovered video's time</td><td><b>Home</b></td><td>restart all</td></tr>
+<tr><td><b>N</b></td><td>random video from the same folder</td><td><b>Y</b></td><td>sync all to hovered video's time</td></tr>
 <tr><td><b>F</b>, <b>F11</b></td><td>fullscreen</td><td><b>H</b></td><td>stats overlay</td></tr>
 <tr><td><b>T</b></td><td>stay on top</td><td><b>Ctrl+M</b></td><td>show / hide the menu bar</td></tr>
 <tr><td><b>Ctrl+O</b></td><td>open videos</td><td><b>Ctrl+Shift+O</b></td><td>add folder (with subfolders)</td></tr>
@@ -145,9 +145,13 @@ class MainWindow(QMainWindow):
         self._act(m, "Quit", self.close, ["Ctrl+Q"])
 
         m = self.play_menu = bar.addMenu("&Playback")
-        self._act(m, "Pause / play all", lambda: c.set_all_paused(not c.all_paused()), ["Space"])
-        self._act(m, "Mute / unmute all", self.toggle_mute_all, ["M"])
-        self._act(m, "Restart all", c.restart_all, ["Home"])
+        self._act(m, "Pause / play",
+                  lambda: (c.hovered.toggle_pause() if c.hovered else c.set_all_paused(not c.all_paused())),
+                  ["Space"])
+        self._act(m, "Mute / unmute",
+                  lambda: (c.hovered.set_muted(not c.hovered.entry.muted) if c.hovered else self.toggle_mute_all()),
+                  ["M"])
+        self._act(m, "Restart all", c.restart_all, ["Home", "Ctrl+R"])
         self._act(m, "Random positions for all", lambda: [t.seek_random() for t in c.tiles], ["S"])
         self._act(m, "Sync all to hovered video", self._hovered(c.sync_to), ["Y"])
         speed = m.addMenu("Speed for all")
@@ -162,8 +166,19 @@ class MainWindow(QMainWindow):
             group.addAction(act)
             self.end_actions[key] = act
         m.addSeparator()
-        self._act(m, "Seek hovered back 5 s", self._hovered(lambda t: t.seek(-5)), ["Left"])
-        self._act(m, "Seek hovered forward 5 s", self._hovered(lambda t: t.seek(5)), ["Right"])
+        self._act(m, "Seek back 5 s",
+                  lambda: (c.hovered.seek(-5) if c.hovered else c.seek_all(-5)),
+                  ["Left"])
+        self._act(m, "Seek forward 5 s",
+                  lambda: (c.hovered.seek(5) if c.hovered else c.seek_all(5)),
+                  ["Right"])
+        self._act(m, "Frame back",
+                  lambda: (c.hovered.frame_back_step() if c.hovered else c.frame_back_step_all()),
+                  [","])
+        self._act(m, "Frame step",
+                  lambda: (c.hovered.frame_step() if c.hovered else c.frame_step_all()),
+                  ["."])
+        m.addSeparator()
         self._act(m, "Replace hovered with random from its folder",
                   self._hovered(c.replace_with_random), ["N"])
         self._act(m, "Reset zoom of hovered video", self._hovered(lambda t: t.reset_zoom()), ["Z"])

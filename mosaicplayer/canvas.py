@@ -649,8 +649,6 @@ class Canvas(QOpenGLWidget):
 
     def wheelEvent(self, event):
         tile = self.tile_at(event.position())
-        if tile is None:
-            return
         mods = event.modifiers()
         action = ("size" if mods & Qt.AltModifier else "zoom" if mods & Qt.ControlModifier
                   else "seek-long" if mods & Qt.ShiftModifier else "seek")
@@ -666,16 +664,25 @@ class Canvas(QOpenGLWidget):
         notches = int(self._wheel_accum / 120)
         if not notches:
             return
+        # One notch per event for precise control; fast wheels still work, just
+        # not in a single giant jump.
+        notches = max(-1, min(1, notches))
         self._wheel_accum -= notches * 120
         if action == "size":
-            self.resize_tile(tile, notches)
+            if tile is not None:
+                self.resize_tile(tile, notches)
         elif action == "zoom":
-            r = self._rect_of(tile)
-            pos = event.position()
-            tile.zoom_at(0.25 * notches,
-                         (pos.x() - r.left()) / r.width(), (pos.y() - r.top()) / r.height())
+            if tile is not None:
+                r = self._rect_of(tile)
+                pos = event.position()
+                tile.zoom_at(0.25 * notches,
+                             (pos.x() - r.left()) / r.width(), (pos.y() - r.top()) / r.height())
         else:
-            tile.seek((30 if action == "seek-long" else 5) * notches)
+            seconds = (30 if action == "seek-long" else 1) * notches
+            if tile is not None:
+                tile.seek_exact(seconds)
+            else:
+                self.seek_all_exact(seconds)
 
     # --- commands -----------------------------------------------------------
 
@@ -775,6 +782,22 @@ class Canvas(QOpenGLWidget):
     def restart_all(self):
         for t in self.tiles:
             t.seek_to(0)
+
+    def seek_all(self, seconds: float):
+        for t in self.tiles:
+            t.seek(seconds)
+
+    def seek_all_exact(self, seconds: float):
+        for t in self.tiles:
+            t.seek_exact(seconds)
+
+    def frame_step_all(self):
+        for t in self.tiles:
+            t.frame_step()
+
+    def frame_back_step_all(self):
+        for t in self.tiles:
+            t.frame_back_step()
 
     def sync_to(self, source: Tile):
         """Seek every video to the same time as ``source``."""
