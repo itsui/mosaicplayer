@@ -121,6 +121,31 @@ def main(argv=None):
     # The program name becomes the window's X11 class name; with "python -m"
     # it would be "__main__.py".
     app = QApplication(["mosaicplayer"])
+    if sys.platform != "win32" or app.platformName() != "windows":
+        return run_app(app, args)
+
+    # Keep the COM MTA alive between WASAPI players and through Qt shutdown.
+    from ctypes import OleDLL, POINTER, byref, c_void_p
+
+    ole = OleDLL("ole32")
+    ole.CoIncrementMTAUsage.argtypes = (POINTER(c_void_p),)
+    ole.CoDecrementMTAUsage.argtypes = (c_void_p,)
+    cookie = c_void_p()
+    try:
+        ole.CoIncrementMTAUsage(byref(cookie))
+    except OSError:
+        logging.getLogger(__name__).warning("Could not keep the Windows audio COM apartment alive")
+        return run_app(app, args)
+    try:
+        return run_app(app, args)
+    finally:
+        try:
+            app.shutdown()
+        finally:
+            ole.CoDecrementMTAUsage(cookie)
+
+
+def run_app(app, args):
     app.setApplicationName("MosaicPlayer")
     app.setOrganizationName("mosaicplayer")
     # Matches mosaicplayer.desktop, so the menu entry and the taskbar button
