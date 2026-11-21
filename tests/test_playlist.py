@@ -114,11 +114,15 @@ def test_byte_order_marks_and_windows_line_ends(tmp_path):
 
 
 def test_latin1_m3u(tmp_path):
-    (tmp_path / "vidéo.mp4").write_bytes(b"")  # the file on disk has a UTF-8 name
+    video = tmp_path / "vidéo.mp4"
+    other = tmp_path / "映像.mp4"
+    video.write_bytes(b"")
+    other.write_bytes(b"")
     m3 = tmp_path / "old.m3u"
-    m3.write_bytes("#EXTM3U\nvidéo.mp4\n".encode("cp1252"))  # written by an old Windows tool
+    m3.write_bytes(b"#EXTM3U\n" + (video.name + "\n").encode("cp1252")
+                   + (other.name + "\n").encode("utf-8"))
     entries, _ = expand_inputs([m3])
-    assert [e.path for e in entries] == [str(tmp_path / "vidéo.mp4")]
+    assert [e.path for e in entries] == [str(video), str(other)]
 
 
 def test_file_uris_become_paths(tmp_path):
@@ -133,6 +137,7 @@ def test_file_uris_become_paths(tmp_path):
     m3u.write_text(f"#EXTM3U\n#EXTINF:5,clip\n{uri}\n")
     assert [e.path for e in read_m3u(m3u).entries] == [str(video)]
     assert [e.path for e in expand_inputs([uri])[0]] == [str(video)]
+    assert [e.path for e in expand_inputs([m3u])[0]] == [str(video)]
 
 
 def test_folder_scan_skips_hidden_folders_and_sorts_naturally(tmp_path):

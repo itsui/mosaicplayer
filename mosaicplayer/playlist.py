@@ -82,7 +82,13 @@ def local_path(item: str) -> str:
     if parsed.netloc not in ("", "localhost"):
         return item  # a file on another host: leave it to mpv
     # surrogateescape keeps file names that aren't UTF-8 as their bytes on disk.
-    return urllib.parse.unquote(parsed.path, errors="surrogateescape")
+    path = urllib.parse.unquote(parsed.path, errors="surrogateescape")
+    if os.name == "nt":
+        # file:///C:/... has a URI slash before the Windows drive.
+        if re.match(r"^/[a-zA-Z]:", path):
+            path = path[1:]
+        return os.path.normpath(path)
+    return path
 
 
 def natural_key(text: str):
@@ -211,11 +217,15 @@ def _m3u_lines(path: Path, base: Path) -> list[str]:
             continue
         except UnicodeDecodeError:
             pass
-        as_bytes = os.fsdecode(raw.strip())  # keeps undecodable bytes as-is
-        if "://" not in as_bytes and (base / as_bytes).exists():
-            lines.append(as_bytes)
+        try:
+            native_name = os.fsdecode(raw.strip())
+        except UnicodeDecodeError:
+            pass  # The native decoder on Windows can reject legacy byte sequences.
         else:
-            lines.append(raw.decode("cp1252", errors="replace"))
+            if "://" not in native_name and (base / native_name).exists():
+                lines.append(native_name)
+                continue
+        lines.append(raw.decode("cp1252", errors="replace"))
     return lines
 
 
