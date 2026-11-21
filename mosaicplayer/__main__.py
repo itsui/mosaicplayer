@@ -193,7 +193,11 @@ def main(argv=None):
     if args.quit_after:
         QTimer.singleShot(int(max(args.quit_after - 10, 1) * 1000), win.canvas.tile_fps)
 
+        capture_timer = None
+
         def finish():
+            if capture_timer is not None:
+                capture_timer.stop()
             if args.screenshot and "{n}" not in args.screenshot:
                 win.canvas.save_screenshot(args.screenshot)
             c = win.canvas
@@ -208,10 +212,11 @@ def main(argv=None):
         QTimer.singleShot(int(args.quit_after * 1000), finish)
         if args.screenshot and "{n}" in args.screenshot:
             shots = iter(range(10_000))
-            timer = QTimer(win, interval=400)
-            timer.timeout.connect(
+            capture_timer = QTimer(win, interval=400)
+            capture_timer.timeout.connect(
                 lambda: win.canvas.save_screenshot(args.screenshot.format(n=next(shots))))
-            QTimer.singleShot(3000, timer.start)
+            QTimer.singleShot(3000, capture_timer.start)
+            app.lastWindowClosed.connect(capture_timer.stop)
     return app.exec()
 
 
